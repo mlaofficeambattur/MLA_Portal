@@ -1,0 +1,95 @@
+# ============================================================
+# SECRETS & ENVIRONMENT VARIABLES  ← NEVER commit these
+# ============================================================
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+# Allow only the safe template files
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
+# ============================================================
+# INTERNAL / CONFIDENTIAL MARKDOWN DOCS  ← Not for public
+# Block all .md files first, then allow only README
+# ============================================================
+*.md
+!README.md
+changes.md
+# ============================================================
+# PYTHON
+# ============================================================
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+build/
+.eggs/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Dev / test scripts (not for production)
+backend/seed.py
+backend/test_concurrency.py
+test_puppeteer.py
+
+# ============================================================
+# NODE / FRONTEND
+# ============================================================
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.cache/
+*.local
+
+# ============================================================
+# OS METADATA
+# ============================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+
+# ============================================================
+# EDITOR & IDE
+# ============================================================
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ============================================================
+# UPLOADS / TEMP
+# ============================================================
+uploads/
+tmp/
+temp/
+
+# ============================================================
+# BUILD ARTIFACTS
+# ============================================================
+dist/
+dist-ssr/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
