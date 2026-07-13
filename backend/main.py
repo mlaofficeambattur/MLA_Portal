@@ -57,10 +57,12 @@ app.add_middleware(
 class Token(BaseModel):
     access_token: str
     token_type: str
+    role: Optional[str] = None
 
 class LoginRequest(BaseModel):
     username: str
     password: str
+    role: Optional[str] = None  # 'SUPER_ADMIN', 'OFFICE_STAFF', 'WARD_MEMBER', 'COUNCILLOR'
 
 class AvailabilityCreate(BaseModel):
     available_date: date
@@ -170,21 +172,26 @@ async def get_current_admin(token: str = Depends(oauth2_scheme)):
         admin = cursor.fetchone()
         
         if admin is None:
-            # If this is the official admin email, auto-provision as SUPER_ADMIN
-            if email == "mlaofficeambattur@gmail.com":
-                cursor.execute(
-                    "INSERT INTO admins (supabase_user_id, role) VALUES (%s, %s) RETURNING id, role;",
-                    (supabase_user_id, "SUPER_ADMIN")
-                )
-                admin = cursor.fetchone()
-                print(f"Auto-provisioned SUPER_ADMIN for {email}")
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access denied: You do not have admin privileges."
-                )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You do not have portal privileges. Contact the MLA office to get registered."
+            )
                 
         return {"id": admin[0], "supabase_user_id": supabase_user_id, "role": admin[1], "email": email}
+
+
+VALID_ROLES = {"SUPER_ADMIN", "OFFICE_STAFF", "ML", "WARD_MEMBER", "COUNCILLOR", "MLA_ASSISTANT", "READ_ONLY"}
+
+def require_role(*allowed_roles):
+    """Dependency factory that checks if the current user has one of the allowed roles."""
+    async def role_checker(current_user: dict = Depends(get_current_admin)):
+        if current_user["role"] not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. Required role(s): {', '.join(allowed_roles)}"
+            )
+        return current_user
+    return role_checker
 
 # -----------------
 # API Endpoints
@@ -245,9 +252,9 @@ def admin_login(form_data: OAuth2PasswordRequestForm = Depends()):
                     )
                     print(f"Auto-provisioned SUPER_ADMIN for {email}")
                 else:
-                    raise HTTPException(status_code=403, detail="Access denied: You do not have admin privileges.")
+                    raise HTTPException(status_code=403, detail="Access denied: You do not have portal privileges. Contact the MLA office to get registered.")
                     
-        return {"access_token": access_token, "token_type": "bearer"}
+        return {"access_token": access_token, "token_type": "bearer", "role": admin[1] if admin else "SUPER_ADMIN"}
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -284,19 +291,29 @@ def admin_login_json(req: LoginRequest):
         if not supabase_user_id or not email:
             raise HTTPException(status_code=401, detail="Invalid token from Supabase")
             
+        # Determine role: use provided role, or auto-detect for known emails
+        role = req.role
+        if role and role not in VALID_ROLES:
+            raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(sorted(VALID_ROLES))}")
+        
         with db.get_db_cursor() as cursor:
             cursor.execute("SELECT id, role FROM admins WHERE supabase_user_id = %s;", (supabase_user_id,))
             admin = cursor.fetchone()
             if admin is None:
-                if email == "mlaofficeambattur@gmail.com":
-                    cursor.execute(
-                        "INSERT INTO admins (supabase_user_id, role) VALUES (%s, %s) RETURNING id, role;",
-                        (supabase_user_id, "SUPER_ADMIN")
-                    )
-                    print(f"Auto-provisioned SUPER_ADMIN for {email}")
+                # Auto-provision: use provided role, or default for MLA office email
+                if role:
+                    assigned_role = role
+                elif email == "mlaofficeambattur@gmail.com":
+                    assigned_role = "SUPER_ADMIN"
                 else:
-                    raise HTTPException(status_code=403, detail="Access denied: You do not have admin privileges.")
-        return {"access_token": access_token, "token_type": "bearer"}
+                    raise HTTPException(status_code=403, detail="Access denied: You do not have portal privileges. Contact the MLA office to get registered.")
+                cursor.execute(
+                    "INSERT INTO admins (supabase_user_id, role) VALUES (%s, %s) RETURNING id, role;",
+                    (supabase_user_id, assigned_role)
+                )
+                admin = cursor.fetchone()
+                print(f"Auto-provisioned {assigned_role} for {email}")
+        return {"access_token": access_token, "token_type": "bearer", "role": admin[1]}
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -349,7 +366,7 @@ def get_admin_profile(current_admin: dict = Depends(get_current_admin)):
 def change_admin_password(
     req: ChangePasswordRequest,
     token: str = Depends(oauth2_scheme),
-    current_admin: dict = Depends(get_current_admin)
+    current_admin: dict = Depends(require_role("SUPER_ADMIN"))
 ):
     """Verifies old password via login, then updates to new password in Supabase Auth."""
     import requests
@@ -586,7 +603,7 @@ def track_appointment(token_number: str, phone: str):
 # --- ADMIN AVAILABILITY MANAGEMENT ---
 
 @app.post("/api/admin/availability")
-def create_availability(req: AvailabilityCreate, current_admin: dict = Depends(get_current_admin)):
+def create_availability(req: AvailabilityCreate, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Creates a new availability range and automatically generates slots."""
     if req.available_date < date.today():
         raise HTTPException(status_code=400, detail="Cannot create availability for a past date.")
@@ -637,7 +654,7 @@ def create_availability(req: AvailabilityCreate, current_admin: dict = Depends(g
     return {"success": True, "message": f"Availability created. Generated {len(slots_to_insert)} slots.", "availability_id": availability_id}
 
 @app.put("/api/admin/availability/{availability_id}")
-def update_availability(availability_id: int, req: AvailabilityCreate, current_admin: dict = Depends(get_current_admin)):
+def update_availability(availability_id: int, req: AvailabilityCreate, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Updates an availability range and regenerates slots. Blocks if slots are already booked."""
     try:
         start_t = datetime.strptime(req.start_time, "%H:%M").time()
@@ -701,7 +718,7 @@ def update_availability(availability_id: int, req: AvailabilityCreate, current_a
     return {"success": True, "message": f"Availability updated. Regenerated {len(slots_to_insert)} slots."}
 
 @app.delete("/api/admin/availability/{availability_id}")
-def delete_availability(availability_id: int, current_admin: dict = Depends(get_current_admin)):
+def delete_availability(availability_id: int, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Deletes an availability range and its slots. Blocks if slots are already booked."""
     with db.get_db_cursor() as cursor:
         # Check if availability exists
@@ -803,7 +820,7 @@ def get_all_appointments(current_admin: dict = Depends(get_current_admin)):
     return {"appointments": appointments}
 
 @app.put("/api/admin/appointments/{appointment_id}")
-def update_appointment_status(appointment_id: int, req: AppointmentStatusUpdate, current_admin: dict = Depends(get_current_admin)):
+def update_appointment_status(appointment_id: int, req: AppointmentStatusUpdate, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Updates appointment status (CONFIRMED, CANCELLED, COMPLETED, NO_SHOW, RESCHEDULED)."""
     with db.get_db_cursor() as cursor:
         # Check if appointment exists and get citizen mobile + current token
@@ -1294,7 +1311,7 @@ def get_all_grievances(current_admin: dict = Depends(get_current_admin)):
 
 # --- ADMIN GRIEVANCE UPDATE ---
 @app.put("/api/admin/grievances/{grievance_id}")
-def update_grievance_status(grievance_id: str, req: GrievanceStatusUpdate, current_admin: dict = Depends(get_current_admin)):
+def update_grievance_status(grievance_id: str, req: GrievanceStatusUpdate, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Updates grievance status and registers history audit trail."""
     try:
         # Fetch citizen's mobile number
@@ -1485,7 +1502,7 @@ def get_admin_news(current_admin: dict = Depends(get_current_admin)):
 
 
 @app.post("/api/admin/news")
-def create_news(req: NewsCreate, current_admin: dict = Depends(get_current_admin)):
+def create_news(req: NewsCreate, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Create a new news item."""
     try:
         news_id = db.create_news(
@@ -1501,7 +1518,7 @@ def create_news(req: NewsCreate, current_admin: dict = Depends(get_current_admin
 
 
 @app.put("/api/admin/news/{news_id}")
-def update_news(news_id: int, req: NewsUpdate, current_admin: dict = Depends(get_current_admin)):
+def update_news(news_id: int, req: NewsUpdate, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Update an existing news item."""
     try:
         updated = db.update_news(
@@ -1522,7 +1539,7 @@ def update_news(news_id: int, req: NewsUpdate, current_admin: dict = Depends(get
 
 
 @app.delete("/api/admin/news/{news_id}")
-def delete_news(news_id: int, current_admin: dict = Depends(get_current_admin)):
+def delete_news(news_id: int, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Delete a news item."""
     try:
         deleted = db.delete_news(news_id)
@@ -1538,7 +1555,7 @@ def delete_news(news_id: int, current_admin: dict = Depends(get_current_admin)):
 @app.post("/api/admin/grievances/import")
 def import_grievances_csv(
     file: UploadFile = File(...),
-    current_admin: dict = Depends(get_current_admin)
+    current_admin: dict = Depends(require_role("SUPER_ADMIN"))
 ):
     """
     Ingests grievances from a CSV file uploaded by an Admin.
@@ -1704,7 +1721,7 @@ def import_grievances_csv(
 @app.post("/api/admin/namma-mla/validate")
 async def validate_namma_mla_sheet(
     file: UploadFile = File(...),
-    current_admin: dict = Depends(get_current_admin)
+    current_admin: dict = Depends(require_role("SUPER_ADMIN"))
 ):
     """
     Validates uploaded Excel (.xlsx) file and returns a preview of valid,
@@ -1723,7 +1740,7 @@ async def validate_namma_mla_sheet(
 @app.post("/api/admin/namma-mla/import")
 def import_namma_mla_data(
     payload: NammaMlaImportRequest,
-    current_admin: dict = Depends(get_current_admin)
+    current_admin: dict = Depends(require_role("SUPER_ADMIN"))
 ):
     """
     Imports the pre-validated Excel rows into the database and logs the batch.
@@ -1968,4 +1985,240 @@ def export_namma_mla_complaints_csv(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------------------------
+# WARD MEMBER ENDPOINTS (role = WARD_MEMBER)
+# ---------------------------------------------
+
+class WardMemberDashboardData(BaseModel):
+    ward_number: str
+    total_grievances: int
+    pending_grievances: int
+    resolved_grievances: int
+    recent_grievances: list
+
+@app.get("/api/ward-member/dashboard", dependencies=[Depends(require_role("WARD_MEMBER", "SUPER_ADMIN", "OFFICE_STAFF"))])
+def get_ward_member_dashboard(current_user: dict = Depends(get_current_admin)):
+    """Returns grievance data filtered for the ward member's ward.
+    The ward number is determined from the admin's stored ward_number field.
+    For now, returns open (unassigned) grievances as a default view.
+    """
+    with db.get_db_cursor() as cursor:
+        # Get ward-specific grievances (unassigned ones visible to ward members)
+        cursor.execute("""
+            SELECT g.id, g.category, g.description, g.status, g.created_at,
+                   c.full_name, c.mobile_number, c.address
+            FROM grievances g
+            JOIN citizens c ON g.citizen_id = c.id
+            WHERE g.assigned_officer IS NULL OR g.assigned_officer = ''
+            ORDER BY g.created_at DESC
+            LIMIT 50;
+        """)
+        grievances = []
+        for row in cursor.fetchall():
+            grievances.append({
+                "id": row[0],
+                "category": row[1],
+                "description": row[2],
+                "status": row[3],
+                "created_at": row[4].isoformat(),
+                "citizen": {
+                    "full_name": row[5],
+                    "mobile_number": row[6],
+                    "address": row[7]
+                }
+            })
+
+        cursor.execute("SELECT COUNT(*) FROM grievances;")
+        total = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM grievances WHERE status = 'PENDING';")
+        pending = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM grievances WHERE status = 'RESOLVED';")
+        resolved = cursor.fetchone()[0]
+
+    return {
+        "ward_number": current_user.get("ward_number", "N/A"),
+        "stats": {
+            "total_grievances": total,
+            "pending_grievances": pending,
+            "resolved_grievances": resolved
+        },
+        "grievances": grievances,
+        "role": current_user["role"]
+    }
+
+
+@app.get("/api/ward-member/grievances", dependencies=[Depends(require_role("WARD_MEMBER", "SUPER_ADMIN", "OFFICE_STAFF"))])
+def get_ward_member_grievances(current_user: dict = Depends(get_current_admin)):
+    """Lists all grievances visible to ward members."""
+    with db.get_db_cursor() as cursor:
+        cursor.execute("""
+            SELECT g.id, g.category, g.description, g.status, g.ward_number, g.created_at,
+                   c.full_name, c.mobile_number
+            FROM grievances g
+            JOIN citizens c ON g.citizen_id = c.id
+            ORDER BY g.created_at DESC;
+        """)
+        grievances = []
+        for row in cursor.fetchall():
+            grievances.append({
+                "id": row[0],
+                "category": row[1],
+                "description": row[2],
+                "status": row[3],
+                "ward_number": row[4],
+                "created_at": row[5].isoformat(),
+                "citizen_name": row[6],
+                "mobile": row[7]
+            })
+    return {"grievances": grievances}
+
+
+# ---------------------------------------------
+# COUNCILLOR ENDPOINTS (role = COUNCILLOR)
+# ---------------------------------------------
+
+@app.get("/api/councillor/dashboard", dependencies=[Depends(require_role("COUNCILLOR", "SUPER_ADMIN", "OFFICE_STAFF"))])
+def get_councillor_dashboard(current_user: dict = Depends(get_current_admin)):
+    """Returns a constituency-level overview for councillors."""
+    with db.get_db_cursor() as cursor:
+        # Appointments summary
+        cursor.execute("SELECT COUNT(*) FROM appointments;")
+        total_appointments = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM appointments WHERE status = 'PENDING' OR status = 'CONFIRMED';")
+        upcoming_appointments = cursor.fetchone()[0]
+
+        # Grievances summary
+        cursor.execute("SELECT COUNT(*) FROM grievances;")
+        total_grievances = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM grievances WHERE status = 'PENDING';")
+        pending_grievances = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM grievances WHERE status = 'RESOLVED';")
+        resolved_grievances = cursor.fetchone()[0]
+
+        # Ward-wise grievance count
+        cursor.execute("""
+            SELECT ward_number, COUNT(*) as cnt
+            FROM grievances
+            GROUP BY ward_number
+            ORDER BY cnt DESC
+            LIMIT 10;
+        """)
+        ward_wise = [{"ward": r[0], "count": r[1]} for r in cursor.fetchall()]
+
+        # Recent appointments
+        cursor.execute("""
+            SELECT a.id, a.token_number, a.status, a.created_at,
+                   c.full_name, s.slot_start
+            FROM appointments a
+            JOIN citizens c ON a.citizen_id = c.id
+            JOIN slots s ON a.slot_id = s.id
+            ORDER BY a.created_at DESC
+            LIMIT 20;
+        """)
+        recent_appointments = []
+        for row in cursor.fetchall():
+            recent_appointments.append({
+                "id": row[0],
+                "token_number": row[1],
+                "status": row[2],
+                "created_at": row[3].isoformat(),
+                "citizen_name": row[4],
+                "slot_start": row[5].isoformat()
+            })
+
+        # Recent grievances
+        cursor.execute("""
+            SELECT g.id, g.category, g.status, g.ward_number, g.created_at,
+                   c.full_name
+            FROM grievances g
+            JOIN citizens c ON g.citizen_id = c.id
+            ORDER BY g.created_at DESC
+            LIMIT 20;
+        """)
+        recent_grievances = []
+        for row in cursor.fetchall():
+            recent_grievances.append({
+                "id": row[0],
+                "category": row[1],
+                "status": row[2],
+                "ward_number": row[3],
+                "created_at": row[4].isoformat(),
+                "citizen_name": row[5]
+            })
+
+    return {
+        "stats": {
+            "total_appointments": total_appointments,
+            "upcoming_appointments": upcoming_appointments,
+            "total_grievances": total_grievances,
+            "pending_grievances": pending_grievances,
+            "resolved_grievances": resolved_grievances
+        },
+        "ward_wise_grievances": ward_wise,
+        "recent_appointments": recent_appointments,
+        "recent_grievances": recent_grievances,
+        "role": current_user["role"]
+    }
+
+
+@app.get("/api/councillor/appointments", dependencies=[Depends(require_role("COUNCILLOR", "SUPER_ADMIN", "OFFICE_STAFF"))])
+def get_councillor_appointments(current_user: dict = Depends(get_current_admin)):
+    """Lists all appointments for councillor view."""
+    with db.get_db_cursor() as cursor:
+        cursor.execute("""
+            SELECT a.id, a.token_number, a.purpose, a.status, a.created_at,
+                   c.full_name, c.mobile_number, c.address,
+                   s.slot_start, s.slot_end
+            FROM appointments a
+            JOIN citizens c ON a.citizen_id = c.id
+            JOIN slots s ON a.slot_id = s.id
+            ORDER BY s.slot_start DESC;
+        """)
+        appointments = []
+        for row in cursor.fetchall():
+            appointments.append({
+                "id": row[0],
+                "token_number": row[1],
+                "purpose": row[2],
+                "status": row[3],
+                "created_at": row[4].isoformat(),
+                "citizen": {
+                    "full_name": row[5],
+                    "mobile_number": row[6],
+                    "address": row[7]
+                },
+                "slot": {
+                    "slot_start": row[8].isoformat(),
+                    "slot_end": row[9].isoformat()
+                }
+            })
+    return {"appointments": appointments}
+
+
+@app.get("/api/councillor/grievances", dependencies=[Depends(require_role("COUNCILLOR", "SUPER_ADMIN", "OFFICE_STAFF"))])
+def get_councillor_grievances(current_user: dict = Depends(get_current_admin)):
+    """Lists all grievances for councillor view."""
+    with db.get_db_cursor() as cursor:
+        cursor.execute("""
+            SELECT g.id, g.category, g.description, g.status, g.ward_number,
+                   g.created_at, g.assigned_officer,
+                   c.full_name, c.mobile_number
+            FROM grievances g
+            JOIN citizens c ON g.citizen_id = c.id
+            ORDER BY g.created_at DESC;
+        """)
+        grievances = []
+        for row in cursor.fetchall():
+            grievances.append({
+                "id": row[0],
+                "category": row[1],
+                "description": row[2],
+                "status": row[3],
+                "ward_number": row[4],
+                "created_at": row[5].isoformat(),
+                "assigned_officer": row[6],
+                "citizen_name": row[7],
+                "mobile": row[8]
+            })
+    return {"grievances": grievances}
 

@@ -593,7 +593,7 @@ export default function App() {
   const lang = 'ta';
   
   
-  const [currentView, setCurrentView] = useState('home'); // home, booking, success, admin-login, admin-dashboard, grievance-submit, grievance-success, grievance-track, appointment-track, whats-new
+  const [currentView, setCurrentView] = useState('home'); // home, booking, success, admin-login, admin-dashboard, ward-member-dashboard, councillor-dashboard, grievance-submit, grievance-success, grievance-track, appointment-track, whats-new
   const [voiceState, setVoiceState] = useState({ page: null, status: 'stopped' }); // status: 'stopped', 'playing', 'paused'
   const [selectedDate, setSelectedDate] = useState('');
   const [availableDates, setAvailableDates] = useState([]);
@@ -709,8 +709,9 @@ export default function App() {
   
   // Admin Authentication & Dashboard state
   const [adminToken, setAdminToken] = useState(localStorage.getItem('admin_token') || '');
+  const [userRole, setUserRole] = useState(localStorage.getItem('user_role') || '');
   const [adminView, setAdminView] = useState('appointments'); // appointments, availability, stats, grievances
-  const [loginData, setLoginData] = useState({ username: '', password: '' });
+  const [loginData, setLoginData] = useState({ username: '', password: '', role: 'SUPER_ADMIN' });
   const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
@@ -888,7 +889,8 @@ export default function App() {
           )}
         </div>
 
-        {/* Status update form */}
+        {/* Status update form - Admin only */}
+        {userRole === 'SUPER_ADMIN' && (
         <form onSubmit={handleUpdateGrievanceStatus} style={{borderTop: '1px solid var(--border-color)', paddingTop: '16px'}}>
           <div className="form-group">
             <label className="form-label">Update Status</label>
@@ -916,6 +918,7 @@ export default function App() {
             Save Status Remarks
           </button>
         </form>
+        )}
       </div>
     );
   };
@@ -1164,7 +1167,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [currentView]);
 
-  // Fetch admin stats and listings when token is set and active
   useEffect(() => {
     if (adminToken && currentView === 'admin-dashboard') {
       fetchAdminData();
@@ -1524,15 +1526,17 @@ export default function App() {
     e.preventDefault();
     setErrorMsg('');
     
-    const params = new URLSearchParams();
-    params.append('username', loginData.username);
-    params.append('password', loginData.password);
+    const role = loginData.role || 'SUPER_ADMIN';
 
     withLoading(
-      fetch(API_BASE + '/admin/login', {
+      fetch(API_BASE + '/admin/login-json', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: loginData.username,
+          password: loginData.password,
+          role: role
+        })
       })
         .then(async res => {
           const data = await res.json();
@@ -1542,10 +1546,14 @@ export default function App() {
           return data;
         })
         .then(data => {
+          const userRole = data.role || role;
           localStorage.setItem('admin_token', data.access_token);
+          localStorage.setItem('user_role', userRole);
           setAdminToken(data.access_token);
+          setUserRole(userRole);
+          
           setCurrentView('admin-dashboard');
-          setLoginData({ username: '', password: '' });
+          setLoginData({ username: '', password: '', role: 'SUPER_ADMIN' });
         })
         .catch(err => {
           setErrorMsg(err.message);
@@ -1634,7 +1642,9 @@ export default function App() {
 
   const handleAdminLogout = () => {
     localStorage.removeItem('admin_token');
+    localStorage.removeItem('user_role');
     setAdminToken('');
+    setUserRole('');
     setCurrentView('home');
   };
 
@@ -3493,10 +3503,23 @@ export default function App() {
               </form>
             ) : (
               <form className="card" onSubmit={handleAdminLogin}>
-                <h2 style={{color: 'var(--navy-blue)', marginBottom: '10px', fontWeight: '800', textAlign: 'center'}}>Admin Portal Login</h2>
-                <p style={{color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '24px'}}>MLA Office Personnel Authentication</p>
+                <h2 style={{color: 'var(--navy-blue)', marginBottom: '10px', fontWeight: '800', textAlign: 'center'}}>Portal Login</h2>
+                <p style={{color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '24px'}}>MLA Office - Admin, Ward Members & Councillors</p>
                 
                 {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
+
+                <div className="form-group">
+                  <label className="form-label">Login As</label>
+                  <select 
+                    className="form-select"
+                    value={loginData.role}
+                    onChange={e => setLoginData({...loginData, role: e.target.value})}
+                  >
+                    <option value="SUPER_ADMIN">Admin</option>
+                    <option value="WARD_MEMBER">Ward Member</option>
+                    <option value="COUNCILLOR">Councillor</option>
+                  </select>
+                </div>
 
                 <div className="form-group">
                   <label className="form-label">Email Address</label>
@@ -3543,7 +3566,7 @@ export default function App() {
                   className="nav-link-btn"
                   style={{width: '100%', padding: '14px', marginTop: '10px'}}
                 >
-                  Authenticate
+                  Sign In
                 </button>
               </form>
             )}
@@ -3789,6 +3812,7 @@ export default function App() {
                   adminToken={adminToken} 
                   API_BASE={API_BASE} 
                   showNotification={showNotification} 
+                  readOnly={userRole !== 'SUPER_ADMIN'}
                 />
               )}
 
@@ -3908,7 +3932,7 @@ export default function App() {
                                 </td>
                                 <td data-label="Actions">
                                   <div style={{display: 'flex', gap: '6px'}}>
-                                    {appt.status === 'PENDING' && (
+                                    {userRole === 'SUPER_ADMIN' && appt.status === 'PENDING' && (
                                       <button 
                                         className="btn btn-secondary" 
                                         style={{padding: '6px 10px', color: 'var(--color-success)', borderColor: 'var(--color-success)'}}
@@ -3919,7 +3943,7 @@ export default function App() {
                                       </button>
                                     )}
                                     
-                                    {appt.status !== 'CANCELLED' && appt.status !== 'COMPLETED' && (
+                                    {userRole === 'SUPER_ADMIN' && appt.status !== 'CANCELLED' && appt.status !== 'COMPLETED' && (
                                       <>
                                         <button 
                                           className="btn btn-secondary" 
@@ -3961,7 +3985,8 @@ export default function App() {
                   <h2 style={{color: 'var(--navy-blue)', marginBottom: '24px', fontWeight: '800'}}>MLA Availability Schedule Management</h2>
                   
                   <div className="grid-2">
-                    {/* Schedule Generation Form */}
+                    {/* Schedule Generation Form - Admin only */}
+                    {userRole === 'SUPER_ADMIN' && (
                     <form className="card" onSubmit={handleCreateAvailability} style={{height: 'fit-content'}}>
                       <h3 style={{color: 'var(--navy-blue)', fontSize: '1.1rem', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px'}}>
                         <Plus size={18} /> Add Availability Window
@@ -4018,6 +4043,7 @@ export default function App() {
                         Generate Slots
                       </button>
                     </form>
+                    )}
 
                     {/* Active Windows List */}
                     <div className="card">
@@ -4043,6 +4069,7 @@ export default function App() {
                                   {avail.start_time} - {avail.end_time} ({avail.slot_duration} min slots)
                                 </div>
                               </div>
+                              {userRole === 'SUPER_ADMIN' && (
                               <button 
                                 className="btn btn-danger" 
                                 style={{padding: '8px'}}
@@ -4050,6 +4077,7 @@ export default function App() {
                               >
                                 <Trash2 size={16} />
                               </button>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -4103,7 +4131,8 @@ export default function App() {
                         </button>
                       </div>
 
-                      {/* CSV Ingestion */}
+                      {/* CSV Ingestion - Admin only */}
+                      {userRole === 'SUPER_ADMIN' && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <label htmlFor="csv-import-file" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', margin: 0, padding: '8px 16px', fontSize: '0.85rem' }}>
                           Upload CM Helpline CSV
@@ -4118,6 +4147,7 @@ export default function App() {
                         />
                         {isImporting && <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Importing...</span>}
                       </div>
+                      )}
                     </div>
 
                     {/* Import result alert banner */}
@@ -4259,7 +4289,7 @@ export default function App() {
                                       </td>
                                       <td data-label="Action">
                                         <button className="btn btn-secondary" style={{padding: '6px 12px', fontSize: '0.8rem'}} onClick={(e) => { e.stopPropagation(); setSelectedGrievance(g); setGrievanceRemarks(g.officer_comments || ''); }}>
-                                          View / Update
+                                          {userRole === 'SUPER_ADMIN' ? 'View / Update' : 'View Details'}
                                         </button>
                                       </td>
                                     </tr>
@@ -4321,7 +4351,8 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Change Password Form */}
+                  {/* Change Password Form - Admin only */}
+                  {userRole === 'SUPER_ADMIN' && (
                   <form className="card" onSubmit={handleChangePassword}>
                     <h3 style={{color: 'var(--navy-blue)', fontSize: '1.1rem', marginBottom: '20px'}}>Update Password</h3>
                     
@@ -4362,6 +4393,7 @@ export default function App() {
                       Save New Password
                     </button>
                   </form>
+                  )}
                 </div>
               </div>
             )}
@@ -4422,10 +4454,160 @@ export default function App() {
             </section>
           </div>
         )}
+
+        {/* VIEW: WARD MEMBER DASHBOARD */}
+        {currentView === 'ward-member-dashboard' && (
+          <div className="container">
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px'}}>
+              <div>
+                <h2 style={{color: 'var(--navy-blue)', fontWeight: '800', margin: 0}}>Ward Member Dashboard</h2>
+                <p style={{color: 'var(--text-secondary)', marginTop: '4px'}}>
+                  Logged in as: <strong>Ward Member</strong>
+                  {adminProfile && <span> | {adminProfile.email}</span>}
+                </p>
+              </div>
+              <button className="btn btn-danger" style={{padding: '8px 16px'}} onClick={handleAdminLogout}>
+                <LogOut size={16} /> Logout
+              </button>
+            </div>
+
+            <div className="card" style={{marginBottom: '24px'}}>
+              <h3 style={{color: 'var(--navy-blue)', marginBottom: '16px'}}>Unassigned Grievances (Open for Ward Action)</h3>
+              <div className="table-wrapper">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Category</th>
+                      <th>Description</th>
+                      <th>Status</th>
+                      <th>Citizen</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminGrievances.filter(g => !g.assigned_officer || g.assigned_officer === '').slice(0, 20).map(g => (
+                      <tr key={g.id}>
+                        <td><strong>{g.id}</strong></td>
+                        <td>{g.category}</td>
+                        <td style={{maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                          {g.description}
+                        </td>
+                        <td><span className={`badge badge-${g.status.toLowerCase()}`}>{g.status}</span></td>
+                        <td>{g.citizen.full_name}<br /><small style={{color: 'var(--text-light)'}}>{g.citizen.mobile_number}</small></td>
+                        <td>{new Date(g.created_at).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                    {adminGrievances.filter(g => !g.assigned_officer || g.assigned_officer === '').length === 0 && (
+                      <tr><td colSpan={6} style={{textAlign: 'center', padding: '24px', color: 'var(--text-secondary)'}}>No open grievances at this time.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW: COUNCILLOR DASHBOARD */}
+        {currentView === 'councillor-dashboard' && (
+          <div className="container">
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px'}}>
+              <div>
+                <h2 style={{color: 'var(--navy-blue)', fontWeight: '800', margin: 0}}>Councillor Dashboard</h2>
+                <p style={{color: 'var(--text-secondary)', marginTop: '4px'}}>
+                  Logged in as: <strong>Councillor</strong>
+                  {adminProfile && <span> | {adminProfile.email}</span>}
+                </p>
+              </div>
+              <button className="btn btn-danger" style={{padding: '8px 16px'}} onClick={handleAdminLogout}>
+                <LogOut size={16} /> Logout
+              </button>
+            </div>
+
+            <div className="stats-grid" style={{marginBottom: '24px'}}>
+              <div className="stat-card">
+                <div className="stat-label">Total Appointments</div>
+                <div className="stat-val">{adminStats?.total_appointments || 0}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Grievances</div>
+                <div className="stat-val">{adminStats?.total_grievances || 0}</div>
+              </div>
+              <div className="stat-card" style={{borderLeft: '4px solid var(--color-warning)'}}>
+                <div className="stat-label">Pending Grievances</div>
+                <div className="stat-val" style={{color: 'var(--color-warning)'}}>{adminStats?.pending_grievances || 0}</div>
+              </div>
+              <div className="stat-card" style={{borderLeft: '4px solid var(--color-success)'}}>
+                <div className="stat-label">Resolved Grievances</div>
+                <div className="stat-val" style={{color: 'var(--color-success)'}}>{adminStats?.resolved_grievances || 0}</div>
+              </div>
+            </div>
+
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px'}}>
+              <div className="card">
+                <h3 style={{color: 'var(--navy-blue)', marginBottom: '16px'}}>Recent Appointments</h3>
+                <div className="table-wrapper" style={{marginBottom: 0}}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Token</th>
+                        <th>Citizen</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminAppointments.slice(0, 10).map(a => (
+                        <tr key={a.id}>
+                          <td><code>{a.token_number}</code></td>
+                          <td>{a.citizen.full_name}</td>
+                          <td><span className={`badge badge-${a.status.toLowerCase()}`}>{a.status}</span></td>
+                          <td>{new Date(a.slot.slot_start).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                      {adminAppointments.length === 0 && (
+                        <tr><td colSpan={4} style={{textAlign: 'center', padding: '16px', color: 'var(--text-secondary)'}}>No appointments.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="card">
+                <h3 style={{color: 'var(--navy-blue)', marginBottom: '16px'}}>Recent Grievances</h3>
+                <div className="table-wrapper" style={{marginBottom: 0}}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Category</th>
+                        <th>Ward</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminGrievances.slice(0, 10).map(g => (
+                        <tr key={g.id}>
+                          <td><strong>{g.id}</strong></td>
+                          <td>{g.category}</td>
+                          <td>{g.ward_number}</td>
+                          <td><span className={`badge badge-${g.status.toLowerCase()}`}>{g.status}</span></td>
+                        </tr>
+                      ))}
+                      {adminGrievances.length === 0 && (
+                        <tr><td colSpan={4} style={{textAlign: 'center', padding: '16px', color: 'var(--text-secondary)'}}>No grievances.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Footer */}
-      {currentView !== 'admin-dashboard' && (
+      {currentView !== 'admin-dashboard' && currentView !== 'ward-member-dashboard' && currentView !== 'councillor-dashboard' && (
         <footer style={{
           backgroundColor: '#000000', 
           color: '#ffffff', 

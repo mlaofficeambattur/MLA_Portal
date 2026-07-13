@@ -49,7 +49,7 @@ const CHART_COLORS = [
   '#f97316'  // Orange
 ];
 
-export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotification }) {
+export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotification, readOnly }) {
   const [activeTab, setActiveTab] = useState('dashboard'); // dashboard, upload, reports, export
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
@@ -343,6 +343,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
           >
             Dashboard
           </button>
+          {!readOnly && (
           <button 
             className={`btn btn-sm ${activeTab === 'upload' ? 'btn-primary' : 'btn-secondary'}`} 
             style={{ borderRadius: 'var(--radius-sm)', border: 'none' }}
@@ -350,6 +351,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
           >
             Upload Daily Sheet
           </button>
+          )}
           <button 
             className={`btn btn-sm ${activeTab === 'reports' ? 'btn-primary' : 'btn-secondary'}`} 
             style={{ borderRadius: 'var(--radius-sm)', border: 'none' }}
@@ -383,6 +385,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                 className="form-control" 
                 style={{ fontSize: '0.85rem', padding: '6px' }}
                 value={filters.start_date}
+                disabled={readOnly}
                 onChange={(e) => setFilters(prev => ({ ...prev, start_date: e.target.value }))}
               />
             </div>
@@ -393,6 +396,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                 className="form-control" 
                 style={{ fontSize: '0.85rem', padding: '6px' }}
                 value={filters.end_date}
+                disabled={readOnly}
                 onChange={(e) => setFilters(prev => ({ ...prev, end_date: e.target.value }))}
               />
             </div>
@@ -402,6 +406,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                 className="form-control" 
                 style={{ fontSize: '0.85rem', padding: '6px' }}
                 value={filters.ward_number}
+                disabled={readOnly}
                 onChange={(e) => setFilters(prev => ({ ...prev, ward_number: e.target.value }))}
               >
                 <option value="">All Wards</option>
@@ -414,6 +419,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                 className="form-control" 
                 style={{ fontSize: '0.85rem', padding: '6px' }}
                 value={filters.category}
+                disabled={readOnly}
                 onChange={(e) => setFilters(prev => ({ ...prev, category: e.target.value }))}
               >
                 <option value="">All Categories</option>
@@ -426,6 +432,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                 className="form-control" 
                 style={{ fontSize: '0.85rem', padding: '6px' }}
                 value={filters.status}
+                disabled={readOnly}
                 onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value }))}
               >
                 <option value="">All Statuses</option>
@@ -442,6 +449,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                 className="form-control" 
                 style={{ fontSize: '0.85rem', padding: '6px' }}
                 value={filters.priority}
+                disabled={readOnly}
                 onChange={(e) => setFilters(prev => ({ ...prev, priority: e.target.value }))}
               >
                 <option value="">All Priorities</option>
@@ -457,6 +465,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                 className="form-control" 
                 style={{ fontSize: '0.85rem', padding: '6px' }}
                 value={filters.assignee}
+                disabled={readOnly}
                 onChange={(e) => setFilters(prev => ({ ...prev, assignee: e.target.value }))}
               >
                 <option value="">All Officers</option>
@@ -472,6 +481,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                   placeholder="e.g. 5431" 
                   style={{ fontSize: '0.85rem', padding: '6px 24px 6px 8px' }}
                   value={filters.search_id}
+                  disabled={readOnly}
                   onChange={(e) => setFilters(prev => ({ ...prev, search_id: e.target.value }))}
                 />
                 <Search size={14} style={{ position: 'absolute', right: '8px', top: '9px', color: 'var(--text-light)' }} />
@@ -486,6 +496,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                   placeholder="Name or Mobile" 
                   style={{ fontSize: '0.85rem', padding: '6px 24px 6px 8px' }}
                   value={filters.search_citizen}
+                  disabled={readOnly}
                   onChange={(e) => setFilters(prev => ({ ...prev, search_citizen: e.target.value }))}
                 />
                 <Search size={14} style={{ position: 'absolute', right: '8px', top: '9px', color: 'var(--text-light)' }} />
