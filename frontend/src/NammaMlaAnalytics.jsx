@@ -506,6 +506,39 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
       window.open(`${API_BASE}/admin/namma-mla/export/csv?${queryParams.toString()}&token=${adminToken}`, '_blank');
     };
 
+    const FIXED_CATEGORIES = [
+      'ROADS_FOOTPATHS',
+      'OTHERS',
+      'WATER_SUPPLY',
+      'DRAINAGE',
+      'WASTE_MANAGEMENT',
+      'STREET_LIGHT',
+      'SANITATION',
+      'PUBLIC_HEALTH'
+    ];
+
+    let matrixRows = [];
+    let totalRow = { category: 'TOTAL', open: 0, pending: 0, closed: 0, total: 0 };
+    if (data && data.category_status_matrix) {
+      matrixRows = FIXED_CATEGORIES.map(cat => {
+        const found = data.category_status_matrix.find(item => item.category === cat);
+        return {
+          category: cat,
+          open: found ? found.open : 0,
+          pending: found ? found.pending : 0,
+          closed: found ? found.closed : 0,
+          total: found ? found.total : 0
+        };
+      });
+      totalRow = matrixRows.reduce((acc, row) => {
+        acc.open += row.open;
+        acc.pending += row.pending;
+        acc.closed += row.closed;
+        acc.total += row.total;
+        return acc;
+      }, { category: 'TOTAL', open: 0, pending: 0, closed: 0, total: 0 });
+    }
+
     return (
       <div className="namma-mla-analytics-module" style={{ backgroundColor: '#F8FAFC', minHeight: '100vh', padding: '24px' }}>
         <div className="analytics-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
@@ -846,123 +879,52 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
           {data && data.kpis.total_complaints > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
-              {/* Row 1: Category Distribution & Assignee Workload */}
+              {/* Row 1: Category Status Matrix & Priority Spread */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px' }}>
-                <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff' }}>
-                  <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>Category Distribution</h3>
-                  <div style={{ height: '300px' }}>
-                    <EChart
-                      option={{
-                        tooltip: {
-                          trigger: 'item',
-                          formatter: (params) => {
-                            return `<div style="font-family: inherit; padding: 4px;">
-                              <span style="font-weight: 600; color: #1e293b;">${params.name}</span><br/>
-                              <span style="color: #64748b;">Grievances:</span> <strong style="color: #0f172a;">${params.value}</strong><br/>
-                              <span style="color: #64748b;">Share:</span> <strong style="color: #16a34a;">${params.percent}%</strong>
-                            </div>`;
-                          }
-                        },
-                        legend: {
-                          orient: 'vertical',
-                          right: '2%',
-                          top: 'middle',
-                          icon: 'circle',
-                          textStyle: { color: '#64748b', fontSize: 11 }
-                        },
-                        series: [
-                          {
-                            name: 'Category',
-                            type: 'pie',
-                            radius: ['55%', '75%'],
-                            center: ['35%', '50%'],
-                            avoidLabelOverlap: false,
-                            itemStyle: {
-                              borderRadius: 6,
-                              borderColor: '#fff',
-                              borderWidth: 2
-                            },
-                            label: {
-                              show: true,
-                              position: 'center',
-                              formatter: () => `Total\n${data.kpis.total_complaints}`,
-                              fontSize: 14,
-                              fontWeight: 'bold',
-                              color: '#0F172A'
-                            },
-                            emphasis: {
-                              scale: true,
-                              scaleSize: 10,
-                              label: {
-                                show: true,
-                                fontSize: 16
-                              }
-                            },
-                            data: data.category_distribution.map((c, index) => ({
-                              value: c.count,
-                              name: c.category,
-                              itemStyle: {
-                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                                  { offset: 0, color: CHART_COLORS[index % CHART_COLORS.length] },
-                                  { offset: 1, color: shadeColor(CHART_COLORS[index % CHART_COLORS.length], -20) }
-                                ])
-                              }
-                            }))
-                          }
-                        ]
-                      }}
-                      onEvents={{
-                        click: (params) => handleOpenDrillDown('category', params.name, `Category: ${params.name}`)
-                      }}
-                    />
+                
+                {/* Category Status Matrix Table */}
+                <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column' }}>
+                  <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>Category Status Matrix</h3>
+                  <div style={{ flexGrow: 1, overflowY: 'auto', maxHeight: '300px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                      <thead style={{ position: 'sticky', top: 0, backgroundColor: '#ffffff', zIndex: 10 }}>
+                        <tr style={{ borderBottom: '2px solid #E2E8F0', textAlign: 'left' }}>
+                          <th style={{ padding: '8px 12px', fontWeight: '700', color: '#475569' }}>Category</th>
+                          <th style={{ padding: '8px 12px', fontWeight: '700', color: '#475569', textAlign: 'right' }}>Open</th>
+                          <th style={{ padding: '8px 12px', fontWeight: '700', color: '#475569', textAlign: 'right' }}>Pending</th>
+                          <th style={{ padding: '8px 12px', fontWeight: '700', color: '#475569', textAlign: 'right' }}>Closed</th>
+                          <th style={{ padding: '8px 12px', fontWeight: '700', color: '#475569', textAlign: 'right' }}>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {matrixRows.map((row, idx) => (
+                          <tr key={row.category} style={{ borderBottom: '1px solid #F1F5F9', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#F8FAFC' }}>
+                            <td style={{ padding: '8px 12px', fontWeight: '600', color: '#1E293B' }}>{row.category}</td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                              <span className="badge" style={{ backgroundColor: '#FFEDD5', color: '#EA580C', fontWeight: '700', padding: '2px 6px', borderRadius: '4px', fontSize: '0.75rem' }}>{row.open}</span>
+                            </td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                              <span className="badge" style={{ backgroundColor: '#FEF3C7', color: '#D97706', fontWeight: '700', padding: '2px 6px', borderRadius: '4px', fontSize: '0.75rem' }}>{row.pending}</span>
+                            </td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                              <span className="badge" style={{ backgroundColor: '#DCFCE7', color: '#15803D', fontWeight: '700', padding: '2px 6px', borderRadius: '4px', fontSize: '0.75rem' }}>{row.closed}</span>
+                            </td>
+                            <td style={{ padding: '8px 12px', fontWeight: '700', color: '#0F172A', textAlign: 'right' }}>{row.total}</td>
+                          </tr>
+                        ))}
+                        <tr style={{ borderTop: '2px solid #E2E8F0', borderBottom: '2px solid #E2E8F0', backgroundColor: '#F1F5F9', fontWeight: '800' }}>
+                          <td style={{ padding: '10px 12px', color: '#0F172A' }}>TOTAL</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', color: '#EA580C' }}>{totalRow.open}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', color: '#D97706' }}>{totalRow.pending}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', color: '#15803D' }}>{totalRow.closed}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', color: '#0F172A' }}>{totalRow.total}</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 
-                <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff' }}>
-                  <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>Assignee Workload</h3>
-                  <div style={{ height: '300px' }}>
-                    <EChart
-                      option={{
-                        tooltip: {
-                          trigger: 'axis',
-                          axisPointer: { type: 'shadow' }
-                        },
-                        grid: { left: '3%', right: '4%', bottom: '3%', top: '3%', containLabel: true },
-                        xAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed', color: '#E2E8F0' } } },
-                        yAxis: {
-                          type: 'category',
-                          data: data.assignee_workload.map(a => a.assignee),
-                          axisLine: { show: false },
-                          axisTick: { show: false }
-                        },
-                        series: [
-                          {
-                            name: 'Complaints Assigned',
-                            type: 'bar',
-                            barWidth: '60%',
-                            data: data.assignee_workload.map((a, idx) => ({
-                              value: a.count,
-                              itemStyle: {
-                                color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-                                  { offset: 0, color: CHART_COLORS[(idx + 2) % CHART_COLORS.length] },
-                                  { offset: 1, color: shadeColor(CHART_COLORS[(idx + 2) % CHART_COLORS.length], 20) }
-                                ]),
-                                borderRadius: [0, 4, 4, 0]
-                              }
-                            }))
-                          }
-                        ]
-                      }}
-                      onEvents={{
-                        click: (params) => handleOpenDrillDown('assignee', params.name, `Assignee: ${params.name}`)
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Row 2: Priority Distribution & Funnel Analysis */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px' }}>
+                {/* Priority Spread Donut Chart */}
                 <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff' }}>
                   <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>Priority Spread</h3>
                   <div style={{ height: '300px' }}>
@@ -970,39 +932,93 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                       option={{
                         tooltip: {
                           trigger: 'item',
-                          formatter: '{b}: <strong>{c}</strong> ({d}%)'
+                          formatter: (params) => {
+                            return `<div style="font-family: inherit; padding: 4px;">
+                              <span style="font-weight: 600; color: #1e293b;">${params.name} Priority</span><br/>
+                              <span style="color: #64748b;">Count:</span> <strong style="color: #0f172a;">${params.value}</strong><br/>
+                              <span style="color: #64748b;">Share:</span> <strong style="color: #2563eb;">${params.percent}%</strong>
+                            </div>`;
+                          }
                         },
                         legend: {
-                          bottom: '0%',
-                          left: 'center',
+                          orient: 'vertical',
+                          right: '5%',
+                          top: 'center',
                           icon: 'circle',
-                          textStyle: { color: '#64748b', fontSize: 11 }
+                          textStyle: { color: '#64748b', fontSize: 11 },
+                          formatter: (name) => {
+                            const dbName = name.toUpperCase();
+                            const found = (data.priority_distribution || []).find(p => p.priority === dbName);
+                            const count = found ? found.count : 0;
+                            return `${name}: ${count}`;
+                          }
                         },
+                        graphic: [
+                          {
+                            type: 'text',
+                            left: '39%',
+                            top: '46%',
+                            style: {
+                              text: `Total\n${
+                                ((data.priority_distribution || []).find(p => p.priority === 'CRITICAL') || {count: 0}).count +
+                                ((data.priority_distribution || []).find(p => p.priority === 'HIGH') || {count: 0}).count +
+                                ((data.priority_distribution || []).find(p => p.priority === 'MEDIUM') || {count: 0}).count
+                              }`,
+                              textAlign: 'center',
+                              fill: '#0F172A',
+                              font: 'bold 14px sans-serif'
+                            }
+                          }
+                        ],
                         series: [
                           {
-                            name: 'Priority',
+                            name: 'Priority Spread',
                             type: 'pie',
-                            radius: '65%',
-                            center: ['50%', '45%'],
-                            roseType: 'radius',
+                            radius: ['50%', '70%'],
+                            center: ['43%', '50%'],
+                            avoidLabelOverlap: false,
                             itemStyle: {
                               borderRadius: 8,
                               borderColor: '#fff',
                               borderWidth: 2
                             },
-                            data: (data.priority_distribution || []).map(p => {
-                              const priorityColors = {
-                                'Urgent': '#DC2626',
-                                'High': '#F59E0B',
-                                'Medium': '#2563EB',
-                                'Low': '#16A34A',
-                                'Very Low': '#64748B'
+                            label: {
+                              show: true,
+                              position: 'outside',
+                              formatter: '{b}: {c}',
+                              fontSize: 11,
+                              fontWeight: 'bold',
+                              color: '#475569'
+                            },
+                            labelLine: {
+                              show: true,
+                              length: 8,
+                              length2: 8
+                            },
+                            emphasis: {
+                              label: {
+                                show: true,
+                                fontSize: 12,
+                                fontWeight: 'bold'
+                              }
+                            },
+                            data: ['Critical', 'High', 'Medium'].map((level) => {
+                              const dbName = level.toUpperCase();
+                              const found = (data.priority_distribution || []).find(p => p.priority === dbName);
+                              const count = found ? found.count : 0;
+                              const colors = {
+                                'Critical': ['#DC2626', '#EF4444'],
+                                'High': ['#F59E0B', '#FBBF24'],
+                                'Medium': ['#2563EB', '#60A5FA']
                               };
                               return {
-                                value: p.count,
-                                name: p.priority,
+                                value: count,
+                                name: level,
                                 itemStyle: {
-                                  color: priorityColors[p.priority] || '#64748B'
+                                  color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: colors[level][0] },
+                                    { offset: 1, color: colors[level][1] }
+                                  ])
                                 }
                               };
                             })
@@ -1010,113 +1026,229 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                         ]
                       }}
                       onEvents={{
-                        click: (params) => handleOpenDrillDown('priority', params.name, `Priority: ${params.name}`)
+                        click: (params) => {
+                          const dbName = params.name === 'Critical' ? 'Urgent' : params.name;
+                          handleOpenDrillDown('priority', dbName, `Priority: ${params.name}`);
+                        }
                       }}
                     />
                   </div>
                 </div>
+              </div>
 
+              {/* Row 2: Open Tickets Analysis & Ward-wise Summary */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px' }}>
+                
+                {/* Open Tickets Analysis Vertical Bar Chart */}
                 <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff' }}>
-                  <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>Resolution Funnel</h3>
+                  <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '8px', fontWeight: '800' }}>Open Tickets Analysis</h3>
+                  <p style={{ color: '#64748B', fontSize: '0.8rem', marginBottom: '16px' }}>Wards with highest number of Open complaints</p>
                   <div style={{ height: '300px' }}>
                     <EChart
                       option={{
                         tooltip: {
-                          trigger: 'item',
-                          formatter: '{b}: <strong>{c}</strong>'
+                          trigger: 'axis',
+                          axisPointer: { type: 'shadow' },
+                          formatter: (params) => {
+                            const p = params[0];
+                            return `<div style="font-family: inherit; padding: 4px;">
+                              <span style="font-weight: 600; color: #1e293b;">Ward ${p.name}</span><br/>
+                              <span style="color: #64748b;">Open Tickets:</span> <strong style="color: #dc2626;">${p.value}</strong>
+                            </div>`;
+                          }
+                        },
+                        grid: { left: '3%', right: '3%', bottom: '10%', top: '15%', containLabel: true },
+                        xAxis: {
+                          type: 'category',
+                          data: [...(data.ward_status_breakdown || [])]
+                            .sort((a, b) => {
+                              const aNum = parseInt(a.ward, 10);
+                              const bNum = parseInt(b.ward, 10);
+                              if (isNaN(aNum) && isNaN(bNum)) return a.ward.localeCompare(b.ward);
+                              if (isNaN(aNum)) return 1;
+                              if (isNaN(bNum)) return -1;
+                              return aNum - bNum;
+                            })
+                            .map(w => w.ward),
+                          axisLabel: {
+                            interval: 0,
+                            rotate: (data.ward_status_breakdown || []).length > 12 ? 45 : 0,
+                            color: '#64748B',
+                            fontWeight: '600',
+                            fontSize: 10
+                          },
+                          axisLine: { lineStyle: { color: '#E2E8F0' } },
+                          axisTick: { show: false }
+                        },
+                        yAxis: {
+                          type: 'value',
+                          splitLine: { lineStyle: { type: 'dashed', color: '#E2E8F0' } },
+                          axisLabel: { color: '#64748B' }
                         },
                         series: [
                           {
-                            name: 'Resolution Process',
-                            type: 'funnel',
-                            left: '10%',
-                            top: 10,
-                            bottom: 10,
-                            width: '80%',
-                            min: 0,
-                            max: data.kpis.total_complaints || 100,
-                            minSize: '0%',
-                            maxSize: '100%',
-                            sort: 'descending',
-                            gap: 2,
+                            name: 'Open Tickets',
+                            type: 'bar',
+                            barWidth: '55%',
                             label: {
                               show: true,
-                              position: 'inside',
-                              formatter: '{b}: {c}'
+                              position: 'top',
+                              color: '#0F172A',
+                              fontWeight: 'bold',
+                              fontSize: 11
                             },
                             itemStyle: {
-                              borderColor: '#fff',
-                              borderWidth: 1
+                              color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: '#EA580C' },
+                                { offset: 1, color: '#FDBA74' }
+                              ]),
+                              borderRadius: [6, 6, 0, 0]
                             },
-                            data: [
-                              { value: data.kpis.total_complaints, name: 'Received' },
-                              { value: data.kpis.open_complaints, name: 'Assigned' },
-                              { value: data.kpis.open_complaints - data.kpis.pending_complaints, name: 'In Progress' },
-                              { value: data.kpis.resolved_complaints, name: 'Resolved' },
-                              { value: Math.round(data.kpis.resolved_complaints * 0.95), name: 'Closed' }
-                            ].map((item, idx) => ({
-                              ...item,
-                              itemStyle: {
-                                color: ['#0F172A', '#2563EB', '#F59E0B', '#16A34A', '#0284C7'][idx]
-                              }
-                            }))
+                            data: [...(data.ward_status_breakdown || [])]
+                              .sort((a, b) => {
+                                const aNum = parseInt(a.ward, 10);
+                                const bNum = parseInt(b.ward, 10);
+                                if (isNaN(aNum) && isNaN(bNum)) return a.ward.localeCompare(b.ward);
+                                if (isNaN(aNum)) return 1;
+                                if (isNaN(bNum)) return -1;
+                                return aNum - bNum;
+                              })
+                              .map(w => w.open)
                           }
                         ]
+                      }}
+                      onEvents={{
+                        click: (params) => {
+                          handleOpenDrillDown('ward_number', params.name, `Ward ${params.name} (Open Tickets)`);
+                        }
                       }}
                     />
                   </div>
                 </div>
-              </div>
 
-              {/* Row 4: Top 10 Wards Stacked Resolution */}
-              <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff' }}>
-                <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>Ward-wise Grievance Resolution Load</h3>
-                <div style={{ height: '300px' }}>
-                  <EChart
-                    option={{
-                      tooltip: {
-                        trigger: 'axis',
-                        axisPointer: { type: 'shadow' }
-                      },
-                      legend: { data: ['Resolved', 'Pending'], bottom: 0 },
-                      grid: { left: '3%', right: '4%', bottom: '12%', top: '5%', containLabel: true },
-                      xAxis: {
-                        type: 'category',
-                        data: data.ward_wise_complaints.map(w => `Ward ${w.ward_number}`),
-                        axisTick: { show: false }
-                      },
-                      yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed', color: '#E2E8F0' } } },
-                      series: [
-                        {
-                          name: 'Resolved',
-                          type: 'bar',
-                          stack: 'total',
-                          itemStyle: { color: '#16A34A' },
-                          data: data.ward_wise_complaints.map(w => Math.round(w.count * ((data.kpis.resolution_percent || 50) / 100)))
-                        },
-                        {
-                          name: 'Pending',
-                          type: 'bar',
-                          stack: 'total',
-                          itemStyle: { color: '#F59E0B', borderRadius: [4, 4, 0, 0] },
-                          data: data.ward_wise_complaints.map(w => w.count - Math.round(w.count * ((data.kpis.resolution_percent || 50) / 100)))
-                        }
-                      ]
-                    }}
-                    onEvents={{
-                      click: (params) => {
-                        const wardNum = params.name.replace('Ward ', '');
-                        handleOpenDrillDown('ward_number', wardNum, `Ward: ${wardNum}`);
-                      }
-                    }}
-                  />
+                {/* Ward-wise Summary 100% Horizontal Stacked Bar Chart */}
+                <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column' }}>
+                  <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '8px', fontWeight: '800' }}>Ward-wise Summary</h3>
+                  <p style={{ color: '#64748B', fontSize: '0.8rem', marginBottom: '16px' }}>Performance metrics by ward (Closed vs Open cases)</p>
+                  <div style={{ flexGrow: 1, overflowY: 'auto', maxHeight: '300px', paddingRight: '8px' }}>
+                    <div style={{ height: `${Math.max(300, (data.ward_status_breakdown || []).length * 35)}px` }}>
+                      <EChart
+                        option={{
+                          tooltip: {
+                            trigger: 'axis',
+                            axisPointer: { type: 'shadow' },
+                            formatter: (params) => {
+                              const closed = params.find(p => p.seriesName === 'Closed %');
+                              const open = params.find(p => p.seriesName === 'Open %');
+                              return `<div style="font-family: inherit; padding: 4px;">
+                                <span style="font-weight: 600; color: #1e293b;">Ward ${params[0].name} Performance</span><br/>
+                                <span style="color: #16a34a;">● Closed:</span> <strong>${closed ? closed.value : 0}%</strong> (${closed ? closed.data.count : 0} cases)<br/>
+                                <span style="color: #ea580c;">● Open:</span> <strong>${open ? open.value : 0}%</strong> (${open ? open.data.count : 0} cases)
+                              </div>`;
+                            }
+                          },
+                          legend: {
+                            data: ['Closed %', 'Open %'],
+                            bottom: '0%',
+                            left: 'center',
+                            icon: 'circle'
+                          },
+                          grid: { left: '3%', right: '4%', bottom: '12%', top: '5%', containLabel: true },
+                          xAxis: {
+                            type: 'value',
+                            min: 0,
+                            max: 100,
+                            axisLabel: { formatter: '{value}%', color: '#64748B' },
+                            splitLine: { show: false }
+                          },
+                          yAxis: {
+                            type: 'category',
+                            data: [...(data.ward_status_breakdown || [])]
+                              .sort((a, b) => {
+                                const aNum = parseInt(a.ward, 10);
+                                const bNum = parseInt(b.ward, 10);
+                                if (isNaN(aNum) && isNaN(bNum)) return a.ward.localeCompare(b.ward);
+                                if (isNaN(aNum)) return 1;
+                                if (isNaN(bNum)) return -1;
+                                return aNum - bNum;
+                              })
+                              .reverse()
+                              .map(w => `${w.ward}`),
+                            axisLabel: { color: '#64748B', fontWeight: '600', fontSize: 10 },
+                            axisLine: { lineStyle: { color: '#E2E8F0' } },
+                            axisTick: { show: false }
+                          },
+                          series: [
+                            {
+                              name: 'Closed %',
+                              type: 'bar',
+                              stack: 'total',
+                              label: {
+                                show: true,
+                                formatter: (p) => p.value > 10 ? `${p.value}%` : '',
+                                color: '#ffffff',
+                                fontWeight: 'bold',
+                                fontSize: 10
+                              },
+                              itemStyle: {
+                                color: '#16A34A'
+                              },
+                              data: [...(data.ward_status_breakdown || [])]
+                                .sort((a, b) => {
+                                  const aNum = parseInt(a.ward, 10);
+                                  const bNum = parseInt(b.ward, 10);
+                                  if (isNaN(aNum) && isNaN(bNum)) return a.ward.localeCompare(b.ward);
+                                  if (isNaN(aNum)) return 1;
+                                  if (isNaN(bNum)) return -1;
+                                  return aNum - bNum;
+                                })
+                                .reverse()
+                                .map(w => {
+                                  const pct = w.total > 0 ? Math.round((w.closed / w.total) * 100) : 0;
+                                  return { value: pct, count: w.closed };
+                                })
+                            },
+                            {
+                              name: 'Open %',
+                              type: 'bar',
+                              stack: 'total',
+                              label: {
+                                show: true,
+                                formatter: (p) => p.value > 10 ? `${p.value}%` : '',
+                                color: '#ffffff',
+                                fontWeight: 'bold',
+                                fontSize: 10
+                              },
+                              itemStyle: {
+                                color: '#EA580C'
+                              },
+                              data: [...(data.ward_status_breakdown || [])]
+                                .sort((a, b) => {
+                                  const aNum = parseInt(a.ward, 10);
+                                  const bNum = parseInt(b.ward, 10);
+                                  if (isNaN(aNum) && isNaN(bNum)) return a.ward.localeCompare(b.ward);
+                                  if (isNaN(aNum)) return 1;
+                                  if (isNaN(bNum)) return -1;
+                                  return aNum - bNum;
+                                })
+                                .reverse()
+                                .map(w => {
+                                  const pct = w.total > 0 ? Math.round((w.open / w.total) * 100) : 0;
+                                  return { value: pct, count: w.open };
+                                })
+                            }
+                          ]
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
               {/* Row 5: Column-based Routing Flow */}
-              <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff' }}>
-                <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>MIS Resolution Flow Routing</h3>
-                <p style={{ color: '#64748B', fontSize: '0.85rem', marginBottom: '20px' }}>
+              <div className="card" style={{ padding: '24px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', border: '1px solid #E2E8F0', backgroundColor: '#ffffff' }}>
+                <h3 style={{ color: '#0F172A', fontSize: '1.1rem', marginBottom: '8px', fontWeight: '800' }}>MIS Resolution Flow Routing</h3>
+                <p style={{ color: '#64748B', fontSize: '0.85rem', marginBottom: '24px' }}>
                   This visualization shows the path complaints take from their specific category, assigned officer, and their final status.
                 </p>
 
@@ -1124,35 +1256,35 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '40px', padding: '10px 0' }}>
 
                     {/* Column 1: Category */}
-                    <div>
-                      <h4 style={{ fontSize: '0.85rem', fontWeight: '700', color: '#0F172A', borderBottom: '2px solid #16A34A', paddingBottom: '4px', marginBottom: '12px' }}>CATEGORY</h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <h4 style={{ fontSize: '0.85rem', fontWeight: '800', color: '#0F172A', borderBottom: '2px solid #16A34A', paddingBottom: '6px', marginBottom: '8px', letterSpacing: '0.05em' }}>CATEGORY</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {data.category_distribution.slice(0, 5).map((c, idx) => (
-                          <div key={c.category} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', backgroundColor: '#F8FAFC', borderLeft: `4px solid ${CHART_COLORS[idx % CHART_COLORS.length]}`, borderRadius: '8px' }}>
-                            <span style={{ fontSize: '0.8rem', fontWeight: '600' }}>{c.category}</span>
-                            <span className="badge badge-success" style={{ fontSize: '0.75rem', backgroundColor: '#E2E8F0', color: '#0F172A' }}>{c.count}</span>
+                          <div key={c.category} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', backgroundColor: '#F8FAFC', borderLeft: `4px solid ${CHART_COLORS[idx % CHART_COLORS.length]}`, borderRadius: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', transition: 'transform 0.2s ease' }} className="flow-card-item">
+                            <span style={{ fontSize: '0.8rem', fontWeight: '600', color: '#1E293B' }}>{c.category}</span>
+                            <span className="badge" style={{ fontSize: '0.75rem', backgroundColor: '#E2E8F0', color: '#0F172A', fontWeight: '700', padding: '2px 8px', borderRadius: '6px' }}>{c.count}</span>
                           </div>
                         ))}
                       </div>
                     </div>
 
                     {/* Column 2: Assignee */}
-                    <div>
-                      <h4 style={{ fontSize: '0.85rem', fontWeight: '700', color: '#0F172A', borderBottom: '2px solid #2563EB', paddingBottom: '4px', marginBottom: '12px' }}>ASSIGNEE</h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <h4 style={{ fontSize: '0.85rem', fontWeight: '800', color: '#0F172A', borderBottom: '2px solid #2563EB', paddingBottom: '6px', marginBottom: '8px', letterSpacing: '0.05em' }}>ASSIGNEE</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {data.assignee_workload.slice(0, 5).map((a) => (
-                          <div key={a.assignee} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', backgroundColor: '#F8FAFC', borderLeft: '4px solid #2563EB', borderRadius: '8px' }}>
-                            <span style={{ fontSize: '0.8rem', fontWeight: '600' }}>{a.assignee}</span>
-                            <span className="badge" style={{ fontSize: '0.75rem', backgroundColor: '#E2E8F0', color: '#0F172A' }}>{a.count}</span>
+                          <div key={a.assignee} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', backgroundColor: '#F8FAFC', borderLeft: '4px solid #2563EB', borderRadius: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', transition: 'transform 0.2s ease' }} className="flow-card-item">
+                            <span style={{ fontSize: '0.8rem', fontWeight: '600', color: '#1E293B' }}>{a.assignee}</span>
+                            <span className="badge" style={{ fontSize: '0.75rem', backgroundColor: '#E2E8F0', color: '#0F172A', fontWeight: '700', padding: '2px 8px', borderRadius: '6px' }}>{a.count}</span>
                           </div>
                         ))}
                       </div>
                     </div>
 
                     {/* Column 3: Final Status */}
-                    <div>
-                      <h4 style={{ fontSize: '0.85rem', fontWeight: '700', color: '#0F172A', borderBottom: '2px solid #F59E0B', paddingBottom: '4px', marginBottom: '12px' }}>STATUS</h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <h4 style={{ fontSize: '0.85rem', fontWeight: '800', color: '#0F172A', borderBottom: '2px solid #F59E0B', paddingBottom: '6px', marginBottom: '8px', letterSpacing: '0.05em' }}>STATUS</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {data.status_distribution.map((s) => {
                           const statusColors = {
                             'Resolved': '#16A34A',
@@ -1171,9 +1303,9 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                           const color = statusColors[s.status] || '#64748B';
                           const bg = statusBgColors[s.status] || '#F1F5F9';
                           return (
-                            <div key={s.status} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', backgroundColor: '#F8FAFC', borderLeft: `4px solid ${color}`, borderRadius: '8px' }}>
-                              <span style={{ fontSize: '0.8rem', fontWeight: '600' }}>{s.status}</span>
-                              <span className="badge" style={{ fontSize: '0.75rem', backgroundColor: bg, color: color }}>{s.count}</span>
+                            <div key={s.status} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', backgroundColor: '#F8FAFC', borderLeft: `4px solid ${color}`, borderRadius: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', transition: 'transform 0.2s ease' }} className="flow-card-item">
+                              <span style={{ fontSize: '0.8rem', fontWeight: '600', color: '#1E293B' }}>{s.status}</span>
+                              <span className="badge" style={{ fontSize: '0.75rem', backgroundColor: bg, color: color, fontWeight: '700', padding: '2px 8px', borderRadius: '6px' }}>{s.count}</span>
                             </div>
                           );
                         })}
@@ -1182,7 +1314,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
 
                   </div>
                 ) : (
-                  <div style={{ textAlign: 'center', padding: '20px', color: '#64748B' }}>Flow data not available.</div>
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#64748B', fontSize: '0.9rem' }}>Flow data not available.</div>
                 )}
               </div>
 

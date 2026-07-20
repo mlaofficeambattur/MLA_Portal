@@ -705,6 +705,47 @@ def get_analytics_data(filters: Dict[str, Any]) -> Dict[str, Any]:
             "links": links
         }
 
+        # 13. Ward-wise status breakdown (for Open Tickets Analysis and Stacked Bar Chart)
+        ward_status_query = f"""
+            SELECT 
+                COALESCE(ward_number, 'Unknown') as ward,
+                COUNT(CASE WHEN status NOT IN ('Resolved', 'Rejected') THEN 1 END) as open,
+                COUNT(CASE WHEN status IN ('Resolved', 'Rejected') THEN 1 END) as closed,
+                COUNT(*) as total
+            FROM namma_mla_complaints
+            {where_sql}
+            GROUP BY ward
+        """
+        cursor.execute(ward_status_query, params)
+        ward_status_breakdown = [
+            {"ward": r[0], "open": r[1], "closed": r[2], "total": r[3]}
+            for r in cursor.fetchall()
+        ]
+
+        # 14. Category Status Matrix
+        cat_matrix_query = f"""
+            SELECT 
+                category,
+                COUNT(CASE WHEN status NOT IN ('Resolved', 'Rejected') THEN 1 END) as open_count,
+                COUNT(CASE WHEN status = 'Pending' THEN 1 END) as pending_count,
+                COUNT(CASE WHEN status IN ('Resolved', 'Rejected') THEN 1 END) as closed_count,
+                COUNT(*) as total_count
+            FROM namma_mla_complaints
+            {where_sql}
+            GROUP BY category
+        """
+        cursor.execute(cat_matrix_query, params)
+        category_status_matrix = [
+            {
+                "category": r[0] or "OTHERS",
+                "open": r[1],
+                "pending": r[2],
+                "closed": r[3],
+                "total": r[4]
+            }
+            for r in cursor.fetchall()
+        ]
+
     return {
         "kpis": kpis,
         "complaint_trend": trends,
@@ -717,7 +758,9 @@ def get_analytics_data(filters: Dict[str, Any]) -> Dict[str, Any]:
         "monthly_comparison": monthly_comparison,
         "resolution_time": resolution_times,
         "heatmap": heatmap,
-        "sankey_flow": sankey
+        "sankey_flow": sankey,
+        "ward_status_breakdown": ward_status_breakdown,
+        "category_status_matrix": category_status_matrix
     }
 
 def get_complaints_list(filters: Dict[str, Any], page: int = 1, limit: int = 20) -> Dict[str, Any]:
