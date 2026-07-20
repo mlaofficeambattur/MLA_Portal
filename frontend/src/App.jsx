@@ -37,22 +37,56 @@ const CM_VIJAY_YOUTUBE_LINKS = [
   {
     title: 'CM Vijay Latest Speeches',
     subtitle: 'Recent public speeches and updates',
-    url: 'https://www.youtube.com/results?search_query=CM+Vijay+latest+speech'
+    url: 'https://www.youtube.com/results?search_query=CM+Vijay+latest+speech',
+    videoId: 'G3HfSkwncps'
   },
   {
-    title: 'CM Vijay Public Meetings',
-    subtitle: 'Meeting videos and event coverage',
-    url: 'https://www.youtube.com/results?search_query=CM+Vijay+public+meeting'
+    title: 'CM Vijay Office Meeting',
+    subtitle: 'First day at secretariat meeting',
+    url: 'https://www.youtube.com/watch?v=JequpshFEek',
+    videoId: 'JequpshFEek'
   },
   {
     title: 'CM Vijay News Updates',
     subtitle: 'Latest news coverage on YouTube',
-    url: 'https://www.youtube.com/results?search_query=CM+Vijay+news+latest'
+    url: 'https://www.youtube.com/watch?v=rfp3uKMlbtw',
+    videoId: 'rfp3uKMlbtw'
   },
   {
-    title:'MLA Balamurugan',
-    subtitle: 'latest news of Balamurugan',
-    url:'https://www.youtube.com/shorts/XmIpdUCum-o'
+    title: 'TVK Latest Speech',
+    subtitle: 'TVK latest speech coverage',
+    url: 'https://www.youtube.com/watch?v=QjuLdD2jBTc',
+    videoId: 'QjuLdD2jBTc'
+  },
+  {
+    title: 'TVK Latest Speech',
+    subtitle: 'TVK latest speech coverage',
+    url: 'https://www.youtube.com/watch?v=fJF3zPbuieo',
+    videoId: 'fJF3zPbuieo'
+  },
+  {
+    title: 'TVK Latest Speech',
+    subtitle: 'TVK latest speech coverage',
+    url: 'https://www.youtube.com/watch?v=heZUaJ0gTn8',
+    videoId: 'heZUaJ0gTn8'
+  },
+  {
+    title: 'TVK Balamurugan Speech',
+    subtitle: 'TVK latest speech coverage',
+    url: 'https://www.youtube.com/watch?v=KjRVqeMogng',
+    videoId: 'KjRVqeMogng'
+  },
+  {
+    title: 'TVK Balamurugan Speech',
+    subtitle: 'TVK latest speech coverage',
+    url: 'https://www.youtube.com/watch?v=WFdWhcJfZXk',
+    videoId: 'WFdWhcJfZXk'
+  },
+  {
+    title: 'TVK Balamurugan Speech',
+    subtitle: 'TVK latest speech coverage',
+    url: 'https://www.youtube.com/watch?v=Zi_FAuFus8Y',
+    videoId: 'Zi_FAuFus8Y'
   }
 ];
 
@@ -559,7 +593,7 @@ export default function App() {
   const lang = 'ta';
   
   
-  const [currentView, setCurrentView] = useState('home'); // home, booking, success, admin-login, admin-dashboard, grievance-submit, grievance-success, grievance-track, appointment-track, whats-new
+  const [currentView, setCurrentView] = useState('home'); // home, booking, success, admin-login, admin-dashboard, ward-member-dashboard, councillor-dashboard, grievance-submit, grievance-success, grievance-track, appointment-track, whats-new
   const [voiceState, setVoiceState] = useState({ page: null, status: 'stopped' }); // status: 'stopped', 'playing', 'paused'
   const [selectedDate, setSelectedDate] = useState('');
   const [availableDates, setAvailableDates] = useState([]);
@@ -675,8 +709,9 @@ export default function App() {
   
   // Admin Authentication & Dashboard state
   const [adminToken, setAdminToken] = useState(localStorage.getItem('admin_token') || '');
+  const [userRole, setUserRole] = useState(localStorage.getItem('user_role') || '');
   const [adminView, setAdminView] = useState('appointments'); // appointments, availability, stats, grievances
-  const [loginData, setLoginData] = useState({ username: '', password: '' });
+  const [loginData, setLoginData] = useState({ username: '', password: '', role: 'SUPER_ADMIN' });
   const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
@@ -854,7 +889,8 @@ export default function App() {
           )}
         </div>
 
-        {/* Status update form */}
+        {/* Status update form - Admin only */}
+        {userRole === 'SUPER_ADMIN' && (
         <form onSubmit={handleUpdateGrievanceStatus} style={{borderTop: '1px solid var(--border-color)', paddingTop: '16px'}}>
           <div className="form-group">
             <label className="form-label">Update Status</label>
@@ -882,6 +918,7 @@ export default function App() {
             Save Status Remarks
           </button>
         </form>
+        )}
       </div>
     );
   };
@@ -1098,38 +1135,38 @@ export default function App() {
     setVoiceState({ page: null, status: 'stopped' });
   }, [currentView]);
 
-  // Fetch government notifications when viewing home or whats-new page, auto-refresh on home
+  // Fetch latest government news from the web via RSS, auto-refresh while viewing
   useEffect(() => {
-    if (currentView === 'home' || currentView === 'whats-new') {
-      fetch(API_BASE + '/news/government')
+    if (currentView !== 'home' && currentView !== 'whats-new') return;
+
+    const fetchNews = () => {
+      const rssUrl = encodeURIComponent(
+        'https://news.google.com/rss/search?q=Tamil+Nadu+government+news+CM+Vijay&hl=en-IN&gl=IN&ceid=IN:en'
+      );
+      fetch(`https://api.rss2json.com/v1/api.json?rss_url=${rssUrl}`)
         .then(res => res.json())
         .then(data => {
-          if (data.news && data.news.length > 0) {
-            setFetchedNews(data.news);
+          if (data.items && data.items.length > 0) {
+            const news = data.items.slice(0, 12).map(item => ({
+              date: item.pubDate ? new Date(item.pubDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+              headline: item.title,
+              description: item.description
+                ? item.description.replace(/<[^>]*>/g, '').substring(0, 200)
+                : '',
+              category: item.categories && item.categories[0] ? item.categories[0] : 'Government',
+              link: item.link
+            }));
+            setFetchedNews(news);
           }
         })
         .catch(() => {});
-    }
+    };
+
+    fetchNews();
+    const interval = setInterval(fetchNews, 300000);
+    return () => clearInterval(interval);
   }, [currentView]);
 
-  // Auto-refresh notifications every 5 minutes on home page
-  useEffect(() => {
-    if (currentView === 'home') {
-      const interval = setInterval(() => {
-        fetch(API_BASE + '/news/government')
-          .then(res => res.json())
-          .then(data => {
-            if (data.news && data.news.length > 0) {
-              setFetchedNews(data.news);
-            }
-          })
-          .catch(() => {});
-      }, 300000);
-      return () => clearInterval(interval);
-    }
-  }, [currentView]);
-
-  // Fetch admin stats and listings when token is set and active
   useEffect(() => {
     if (adminToken && currentView === 'admin-dashboard') {
       fetchAdminData();
@@ -1489,15 +1526,17 @@ export default function App() {
     e.preventDefault();
     setErrorMsg('');
     
-    const params = new URLSearchParams();
-    params.append('username', loginData.username);
-    params.append('password', loginData.password);
+    const role = loginData.role || 'SUPER_ADMIN';
 
     withLoading(
-      fetch(API_BASE + '/admin/login', {
+      fetch(API_BASE + '/admin/login-json', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: loginData.username,
+          password: loginData.password,
+          role: role
+        })
       })
         .then(async res => {
           const data = await res.json();
@@ -1507,10 +1546,14 @@ export default function App() {
           return data;
         })
         .then(data => {
+          const userRole = data.role || role;
           localStorage.setItem('admin_token', data.access_token);
+          localStorage.setItem('user_role', userRole);
           setAdminToken(data.access_token);
+          setUserRole(userRole);
+          
           setCurrentView('admin-dashboard');
-          setLoginData({ username: '', password: '' });
+          setLoginData({ username: '', password: '', role: 'SUPER_ADMIN' });
         })
         .catch(err => {
           setErrorMsg(err.message);
@@ -1599,7 +1642,9 @@ export default function App() {
 
   const handleAdminLogout = () => {
     localStorage.removeItem('admin_token');
+    localStorage.removeItem('user_role');
     setAdminToken('');
+    setUserRole('');
     setCurrentView('home');
   };
 
@@ -2036,24 +2081,20 @@ export default function App() {
           </div>
 
           <div className="navbar-right-controls" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <button 
-              className="nav-link-btn navbar-admin-btn" 
-              onClick={() => {
-                if (adminToken) {
+            {adminToken && currentView !== 'home' && (
+              <button 
+                className="nav-link-btn navbar-admin-btn" 
+                onClick={() => {
                   setCurrentView('admin-dashboard');
                   setAdminView('appointments');
-                } else {
-                  setCurrentView('admin-login');
-                  setErrorMsg('');
-                }
-                setMobileMenuOpen(false);
-                setActiveDropdown(null);
-              }}
-            >
-              <span className="desktop-admin-text">{adminToken ? 'Dashboard' : 'Admin'}</span>
-              <span className="mobile-admin-text">{adminToken ? 'Dashboard' : 'Admin'}</span>
-            </button>
-
+                  setMobileMenuOpen(false);
+                  setActiveDropdown(null);
+                }}
+              >
+                <span className="desktop-admin-text">Dashboard</span>
+                <span className="mobile-admin-text">Dashboard</span>
+              </button>
+            )}
             <button 
               type="button" 
               className="btn btn-secondary" 
@@ -2336,111 +2377,157 @@ export default function App() {
               </div>
             </div>
 
-            {/* CM Vijay YouTube Links Section */}
+            {/* CM Vijay YouTube Videos Section */}
             <section style={{ marginTop: '60px', paddingTop: '40px', borderTop: '1px solid var(--border-color)' }}>
-              <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+              <div style={{ textAlign: 'center', marginBottom: '24px' }}>
                 <h2 style={{ color: 'var(--navy-blue)', fontWeight: '800', marginBottom: '8px' }}>
-                  <BilingualText ta="CM விஜய் YouTube இணைப்புகள்" en="CM Vijay YouTube Links" />
+                  <BilingualText ta="CM விஜய் - சமீபத்திய காணொளிகள்" en="CM Vijay - Latest Videos" />
                 </h2>
                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', margin: '0 auto', maxWidth: '640px' }}>
-                  <BilingualText ta="சமீபத்திய உரைகள், பொதுக்கூட்டங்கள் மற்றும் செய்தி காணொளிகளை பார்க்கவும்." en="Watch latest speeches, public meetings, and news videos separately." />
+                  <BilingualText ta="சமீபத்திய உரை மற்றும் நிகழ்வுகளை நேரடியாக காண்க" en="Watch latest speeches, public meetings, and news videos directly." />
                 </p>
               </div>
 
+              {/* First row heading */}
+              <h3 style={{
+                textAlign: 'center',
+                fontWeight: '700',
+                fontSize: '1.15rem',
+                color: '#8b0000',
+                marginBottom: '12px',
+                borderBottom: '3px solid #ffd700',
+                paddingBottom: '6px',
+                display: 'inline-block',
+                width: '100%'
+              }}>
+                CM Vijay Latest Speech
+              </h3>
+
+              {/* First row videos (first 3) */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                gap: '16px'
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gap: '16px',
+                marginBottom: '32px'
               }}>
-                {CM_VIJAY_YOUTUBE_LINKS.map((link) => (
-                  <a
-                    key={link.title}
-                    href={link.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="card"
-                    style={{
-                      padding: '18px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '14px',
-                      backgroundColor: '#b91c1c',
-                      border: 'none',
-                      color: '#ffffff'
-                    }}
-                  >
-                    <span style={{
-                      width: '44px',
-                      height: '44px',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'rgba(255,255,255,0.2)',
-                      color: '#ffffff',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0
-                    }}>
-                      <CirclePlay size={24} />
-                    </span>
-                    <span style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0, flex: 1 }}>
-                      <strong style={{ color: '#ffffff', fontSize: '1rem' }}>{link.title}</strong>
-                      <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.85rem' }}>{link.subtitle}</span>
-                    </span>
-                    <ExternalLink size={18} style={{ color: 'rgba(255,255,255,0.6)', flexShrink: 0 }} />
-                  </a>
+                {CM_VIJAY_YOUTUBE_LINKS.slice(0, 3).map((link) => (
+                  <div key={link.title} className="card" style={{ padding: '0', overflow: 'hidden', backgroundColor: '#000' }}>
+                    <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0 }}>
+                      <iframe
+                        src={`https://www.youtube.com/embed/${link.videoId}?autoplay=0&rel=0&vq=hd1080`}
+                        title={link.title}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          border: 'none'
+                        }}
+                      />
+                    </div>
+                    <div style={{ padding: '10px 12px', backgroundColor: '#b91c1c', color: '#ffffff' }}>
+                      <strong style={{ fontSize: '0.85rem', display: 'block' }}>{link.title}</strong>
+                      <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.8)' }}>{link.subtitle}</span>
+                    </div>
+                  </div>
                 ))}
               </div>
-            </section>
 
-            {/* TVK Social Media Channels Section */}
-            <section style={{ marginTop: '36px', paddingTop: '28px' }}>
-              <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-                <h3 style={{ color: 'var(--navy-blue)', fontWeight: '800', marginBottom: '8px' }}>
-                  <BilingualText ta="TVK சமூக ஊடக சேனல்கள்" en="TVK Social Media Channels" />
-                </h3>
+              {/* Second row heading */}
+              <h3 style={{
+                textAlign: 'center',
+                fontWeight: '700',
+                fontSize: '1.15rem',
+                color: '#8b0000',
+                marginBottom: '12px',
+                borderBottom: '3px solid #ffd700',
+                paddingBottom: '6px',
+                display: 'inline-block',
+                width: '100%'
+              }}>
+                TVK latest speech
+              </h3>
 
-              </div>
-
+              {/* Second row videos (next 3) */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gap: '16px',
+                marginBottom: '32px'
+              }}>
+                {CM_VIJAY_YOUTUBE_LINKS.slice(3, 6).map((link) => (
+                  <div key={link.title} className="card" style={{ padding: '0', overflow: 'hidden', backgroundColor: '#000' }}>
+                    <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0 }}>
+                      <iframe
+                        src={`https://www.youtube.com/embed/${link.videoId}?autoplay=0&rel=0&vq=hd1080`}
+                        title={link.title}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          border: 'none'
+                        }}
+                      />
+                    </div>
+                    <div style={{ padding: '10px 12px', backgroundColor: '#b91c1c', color: '#ffffff' }}>
+                      <strong style={{ fontSize: '0.85rem', display: 'block' }}>{link.title}</strong>
+                      <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.8)' }}>{link.subtitle}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Third row heading */}
+              <h3 style={{
+                textAlign: 'center',
+                fontWeight: '700',
+                fontSize: '1.15rem',
+                color: '#8b0000',
+                marginBottom: '12px',
+                borderBottom: '3px solid #ffd700',
+                paddingBottom: '6px',
+                display: 'inline-block',
+                width: '100%'
+              }}>
+                TVK Balamurugan speech
+              </h3>
+
+              {/* Third row videos (last 3) */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
                 gap: '16px'
               }}>
-                {TVK_SOCIAL_CHANNELS.map((channel) => (
-                  <a
-                    key={channel.title}
-                    href={channel.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="card"
-                    style={{
-                      padding: '18px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '14px',
-                      backgroundColor: '#b91c1c',
-                      border: 'none',
-                      color: '#ffffff'
-                    }}
-                  >
-                    <span style={{
-                      width: '44px',
-                      height: '44px',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'rgba(255,255,255,0.2)',
-                      color: '#ffffff',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0
-                    }}>
-                      <SocialBrandIcon type={channel.iconType} size={20} color={channel.iconColor} />
-                    </span>
-                    <span style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0, flex: 1 }}>
-                      <strong style={{ color: '#ffffff', fontSize: '1rem' }}>{channel.title}</strong>
-                    </span>
-                    <ExternalLink size={18} style={{ color: 'rgba(255,255,255,0.6)', flexShrink: 0 }} />
-                  </a>
+                {CM_VIJAY_YOUTUBE_LINKS.slice(6).map((link) => (
+                  <div key={link.title} className="card" style={{ padding: '0', overflow: 'hidden', backgroundColor: '#000' }}>
+                    <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0 }}>
+                      <iframe
+                        src={`https://www.youtube.com/embed/${link.videoId}?autoplay=0&rel=0&vq=hd1080`}
+                        title={link.title}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          border: 'none'
+                        }}
+                      />
+                    </div>
+                    <div style={{ padding: '10px 12px', backgroundColor: '#b91c1c', color: '#ffffff' }}>
+                      <strong style={{ fontSize: '0.85rem', display: 'block' }}>{link.title}</strong>
+                      <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.8)' }}>{link.subtitle}</span>
+                    </div>
+                  </div>
                 ))}
               </div>
             </section>
@@ -3416,10 +3503,23 @@ export default function App() {
               </form>
             ) : (
               <form className="card" onSubmit={handleAdminLogin}>
-                <h2 style={{color: 'var(--navy-blue)', marginBottom: '10px', fontWeight: '800', textAlign: 'center'}}>Admin Portal Login</h2>
-                <p style={{color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '24px'}}>MLA Office Personnel Authentication</p>
+                <h2 style={{color: 'var(--navy-blue)', marginBottom: '10px', fontWeight: '800', textAlign: 'center'}}>Portal Login</h2>
+                <p style={{color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '24px'}}>MLA Office - Admin, Ward Members & Councillors</p>
                 
                 {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
+
+                <div className="form-group">
+                  <label className="form-label">Login As</label>
+                  <select 
+                    className="form-select"
+                    value={loginData.role}
+                    onChange={e => setLoginData({...loginData, role: e.target.value})}
+                  >
+                    <option value="SUPER_ADMIN">Admin</option>
+                    <option value="WARD_MEMBER">Ward Member</option>
+                    <option value="COUNCILLOR">Councillor</option>
+                  </select>
+                </div>
 
                 <div className="form-group">
                   <label className="form-label">Email Address</label>
@@ -3466,7 +3566,7 @@ export default function App() {
                   className="nav-link-btn"
                   style={{width: '100%', padding: '14px', marginTop: '10px'}}
                 >
-                  Authenticate
+                  Sign In
                 </button>
               </form>
             )}
@@ -3712,6 +3812,7 @@ export default function App() {
                   adminToken={adminToken} 
                   API_BASE={API_BASE} 
                   showNotification={showNotification} 
+                  readOnly={userRole !== 'SUPER_ADMIN'}
                 />
               )}
 
@@ -3831,7 +3932,7 @@ export default function App() {
                                 </td>
                                 <td data-label="Actions">
                                   <div style={{display: 'flex', gap: '6px'}}>
-                                    {appt.status === 'PENDING' && (
+                                    {userRole === 'SUPER_ADMIN' && appt.status === 'PENDING' && (
                                       <button 
                                         className="btn btn-secondary" 
                                         style={{padding: '6px 10px', color: 'var(--color-success)', borderColor: 'var(--color-success)'}}
@@ -3842,7 +3943,7 @@ export default function App() {
                                       </button>
                                     )}
                                     
-                                    {appt.status !== 'CANCELLED' && appt.status !== 'COMPLETED' && (
+                                    {userRole === 'SUPER_ADMIN' && appt.status !== 'CANCELLED' && appt.status !== 'COMPLETED' && (
                                       <>
                                         <button 
                                           className="btn btn-secondary" 
@@ -3884,7 +3985,8 @@ export default function App() {
                   <h2 style={{color: 'var(--navy-blue)', marginBottom: '24px', fontWeight: '800'}}>MLA Availability Schedule Management</h2>
                   
                   <div className="grid-2">
-                    {/* Schedule Generation Form */}
+                    {/* Schedule Generation Form - Admin only */}
+                    {userRole === 'SUPER_ADMIN' && (
                     <form className="card" onSubmit={handleCreateAvailability} style={{height: 'fit-content'}}>
                       <h3 style={{color: 'var(--navy-blue)', fontSize: '1.1rem', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px'}}>
                         <Plus size={18} /> Add Availability Window
@@ -3941,6 +4043,7 @@ export default function App() {
                         Generate Slots
                       </button>
                     </form>
+                    )}
 
                     {/* Active Windows List */}
                     <div className="card">
@@ -3966,6 +4069,7 @@ export default function App() {
                                   {avail.start_time} - {avail.end_time} ({avail.slot_duration} min slots)
                                 </div>
                               </div>
+                              {userRole === 'SUPER_ADMIN' && (
                               <button 
                                 className="btn btn-danger" 
                                 style={{padding: '8px'}}
@@ -3973,6 +4077,7 @@ export default function App() {
                               >
                                 <Trash2 size={16} />
                               </button>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -4026,7 +4131,8 @@ export default function App() {
                         </button>
                       </div>
 
-                      {/* CSV Ingestion */}
+                      {/* CSV Ingestion - Admin only */}
+                      {userRole === 'SUPER_ADMIN' && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <label htmlFor="csv-import-file" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', margin: 0, padding: '8px 16px', fontSize: '0.85rem' }}>
                           Upload CM Helpline CSV
@@ -4041,6 +4147,7 @@ export default function App() {
                         />
                         {isImporting && <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Importing...</span>}
                       </div>
+                      )}
                     </div>
 
                     {/* Import result alert banner */}
@@ -4182,7 +4289,7 @@ export default function App() {
                                       </td>
                                       <td data-label="Action">
                                         <button className="btn btn-secondary" style={{padding: '6px 12px', fontSize: '0.8rem'}} onClick={(e) => { e.stopPropagation(); setSelectedGrievance(g); setGrievanceRemarks(g.officer_comments || ''); }}>
-                                          View / Update
+                                          {userRole === 'SUPER_ADMIN' ? 'View / Update' : 'View Details'}
                                         </button>
                                       </td>
                                     </tr>
@@ -4244,7 +4351,8 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Change Password Form */}
+                  {/* Change Password Form - Admin only */}
+                  {userRole === 'SUPER_ADMIN' && (
                   <form className="card" onSubmit={handleChangePassword}>
                     <h3 style={{color: 'var(--navy-blue)', fontSize: '1.1rem', marginBottom: '20px'}}>Update Password</h3>
                     
@@ -4285,6 +4393,7 @@ export default function App() {
                       Save New Password
                     </button>
                   </form>
+                  )}
                 </div>
               </div>
             )}
@@ -4345,10 +4454,160 @@ export default function App() {
             </section>
           </div>
         )}
+
+        {/* VIEW: WARD MEMBER DASHBOARD */}
+        {currentView === 'ward-member-dashboard' && (
+          <div className="container">
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px'}}>
+              <div>
+                <h2 style={{color: 'var(--navy-blue)', fontWeight: '800', margin: 0}}>Ward Member Dashboard</h2>
+                <p style={{color: 'var(--text-secondary)', marginTop: '4px'}}>
+                  Logged in as: <strong>Ward Member</strong>
+                  {adminProfile && <span> | {adminProfile.email}</span>}
+                </p>
+              </div>
+              <button className="btn btn-danger" style={{padding: '8px 16px'}} onClick={handleAdminLogout}>
+                <LogOut size={16} /> Logout
+              </button>
+            </div>
+
+            <div className="card" style={{marginBottom: '24px'}}>
+              <h3 style={{color: 'var(--navy-blue)', marginBottom: '16px'}}>Unassigned Grievances (Open for Ward Action)</h3>
+              <div className="table-wrapper">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Category</th>
+                      <th>Description</th>
+                      <th>Status</th>
+                      <th>Citizen</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminGrievances.filter(g => !g.assigned_officer || g.assigned_officer === '').slice(0, 20).map(g => (
+                      <tr key={g.id}>
+                        <td><strong>{g.id}</strong></td>
+                        <td>{g.category}</td>
+                        <td style={{maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                          {g.description}
+                        </td>
+                        <td><span className={`badge badge-${g.status.toLowerCase()}`}>{g.status}</span></td>
+                        <td>{g.citizen.full_name}<br /><small style={{color: 'var(--text-light)'}}>{g.citizen.mobile_number}</small></td>
+                        <td>{new Date(g.created_at).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                    {adminGrievances.filter(g => !g.assigned_officer || g.assigned_officer === '').length === 0 && (
+                      <tr><td colSpan={6} style={{textAlign: 'center', padding: '24px', color: 'var(--text-secondary)'}}>No open grievances at this time.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW: COUNCILLOR DASHBOARD */}
+        {currentView === 'councillor-dashboard' && (
+          <div className="container">
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px'}}>
+              <div>
+                <h2 style={{color: 'var(--navy-blue)', fontWeight: '800', margin: 0}}>Councillor Dashboard</h2>
+                <p style={{color: 'var(--text-secondary)', marginTop: '4px'}}>
+                  Logged in as: <strong>Councillor</strong>
+                  {adminProfile && <span> | {adminProfile.email}</span>}
+                </p>
+              </div>
+              <button className="btn btn-danger" style={{padding: '8px 16px'}} onClick={handleAdminLogout}>
+                <LogOut size={16} /> Logout
+              </button>
+            </div>
+
+            <div className="stats-grid" style={{marginBottom: '24px'}}>
+              <div className="stat-card">
+                <div className="stat-label">Total Appointments</div>
+                <div className="stat-val">{adminStats?.total_appointments || 0}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Grievances</div>
+                <div className="stat-val">{adminStats?.total_grievances || 0}</div>
+              </div>
+              <div className="stat-card" style={{borderLeft: '4px solid var(--color-warning)'}}>
+                <div className="stat-label">Pending Grievances</div>
+                <div className="stat-val" style={{color: 'var(--color-warning)'}}>{adminStats?.pending_grievances || 0}</div>
+              </div>
+              <div className="stat-card" style={{borderLeft: '4px solid var(--color-success)'}}>
+                <div className="stat-label">Resolved Grievances</div>
+                <div className="stat-val" style={{color: 'var(--color-success)'}}>{adminStats?.resolved_grievances || 0}</div>
+              </div>
+            </div>
+
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px'}}>
+              <div className="card">
+                <h3 style={{color: 'var(--navy-blue)', marginBottom: '16px'}}>Recent Appointments</h3>
+                <div className="table-wrapper" style={{marginBottom: 0}}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Token</th>
+                        <th>Citizen</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminAppointments.slice(0, 10).map(a => (
+                        <tr key={a.id}>
+                          <td><code>{a.token_number}</code></td>
+                          <td>{a.citizen.full_name}</td>
+                          <td><span className={`badge badge-${a.status.toLowerCase()}`}>{a.status}</span></td>
+                          <td>{new Date(a.slot.slot_start).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                      {adminAppointments.length === 0 && (
+                        <tr><td colSpan={4} style={{textAlign: 'center', padding: '16px', color: 'var(--text-secondary)'}}>No appointments.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="card">
+                <h3 style={{color: 'var(--navy-blue)', marginBottom: '16px'}}>Recent Grievances</h3>
+                <div className="table-wrapper" style={{marginBottom: 0}}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Category</th>
+                        <th>Ward</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminGrievances.slice(0, 10).map(g => (
+                        <tr key={g.id}>
+                          <td><strong>{g.id}</strong></td>
+                          <td>{g.category}</td>
+                          <td>{g.ward_number}</td>
+                          <td><span className={`badge badge-${g.status.toLowerCase()}`}>{g.status}</span></td>
+                        </tr>
+                      ))}
+                      {adminGrievances.length === 0 && (
+                        <tr><td colSpan={4} style={{textAlign: 'center', padding: '16px', color: 'var(--text-secondary)'}}>No grievances.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Footer */}
-      {currentView !== 'admin-dashboard' && (
+      {currentView !== 'admin-dashboard' && currentView !== 'ward-member-dashboard' && currentView !== 'councillor-dashboard' && (
         <footer style={{
           backgroundColor: '#000000', 
           color: '#ffffff', 
@@ -4413,6 +4672,41 @@ export default function App() {
                     <BilingualText text={TRANSLATIONS[lang].privacyPolicy} />
                   </button>
                 </div>
+              </div>
+            </div>
+
+            {/* Column 4: TVK Social Media */}
+            <div className="footer-column">
+              <h4 style={{ fontSize: '1rem', marginBottom: '16px' }}>
+                <BilingualText ta="TVK சமூக ஊடக சேனல்கள்" en="TVK Social Media" />
+              </h4>
+              <div className="footer-column-content" style={{ fontSize: '0.85rem', display: 'flex', flexDirection: 'row', gap: '0', flexWrap: 'nowrap' }}>
+                {TVK_SOCIAL_CHANNELS.map((channel) => (
+                  <a
+                    key={channel.title}
+                    href={channel.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      flex: 1,
+                      color: '#ffffff',
+                      textDecoration: 'none',
+                      padding: '8px 12px',
+                      borderRadius: 'var(--radius-sm)',
+                      backgroundColor: 'rgba(255,255,255,0.05)',
+                      transition: 'background 0.2s'
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.15)'}
+                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'}
+                  >
+                    <SocialBrandIcon type={channel.iconType} size={18} color={channel.iconColor} />
+                    <span style={{ whiteSpace: 'nowrap' }}>{channel.title}</span>
+                  </a>
+                ))}
               </div>
             </div>
           </div>
