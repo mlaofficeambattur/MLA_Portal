@@ -540,15 +540,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
             >
               Dashboard
             </button>
-            {!readOnly && (
-              <button
-                className={`btn btn-sm ${activeTab === 'upload' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ borderRadius: 'var(--radius-sm)', border: 'none' }}
-                onClick={() => setActiveTab('upload')}
-              >
-                Upload Daily Sheet
-              </button>
-            )}
+
             <button 
               className={`btn btn-sm ${activeTab === 'reports' ? 'btn-primary' : 'btn-secondary'}`} 
               style={{ borderRadius: 'var(--radius-sm)', border: 'none' }}
