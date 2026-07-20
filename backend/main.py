@@ -1748,6 +1748,7 @@ def get_namma_mla_analytics(
     constituency: Optional[str] = None,
     search_id: Optional[str] = None,
     search_citizen: Optional[str] = None,
+    month: Optional[str] = None,
     current_admin: dict = Depends(get_current_admin)
 ):
     """
@@ -1764,7 +1765,8 @@ def get_namma_mla_analytics(
         "assignee": assignee,
         "constituency": constituency,
         "search_id": search_id,
-        "search_citizen": search_citizen
+        "search_citizen": search_citizen,
+        "month": month
     }
     try:
         analytics = namma_mla_analytics.get_analytics_data(filters)
@@ -1786,6 +1788,7 @@ def get_namma_mla_complaints_list(
     constituency: Optional[str] = None,
     search_id: Optional[str] = None,
     search_citizen: Optional[str] = None,
+    month: Optional[str] = None,
     current_admin: dict = Depends(get_current_admin)
 ):
     """
@@ -1801,7 +1804,8 @@ def get_namma_mla_complaints_list(
         "assignee": assignee,
         "constituency": constituency,
         "search_id": search_id,
-        "search_citizen": search_citizen
+        "search_citizen": search_citizen,
+        "month": month
     }
     try:
         complaints_data = namma_mla_analytics.get_complaints_list(filters, page, limit)
@@ -1819,6 +1823,7 @@ def get_namma_mla_leaderboard(
     priority: Optional[str] = None,
     assignee: Optional[str] = None,
     constituency: Optional[str] = None,
+    month: Optional[str] = None,
     current_admin: dict = Depends(get_current_admin)
 ):
     """
@@ -1832,7 +1837,8 @@ def get_namma_mla_leaderboard(
         "status": status,
         "priority": priority,
         "assignee": assignee,
-        "constituency": constituency
+        "constituency": constituency,
+        "month": month
     }
     try:
         leaderboard = namma_mla_analytics.get_leaderboard_data(filters)
@@ -1850,6 +1856,7 @@ def get_namma_mla_wards_performance(
     priority: Optional[str] = None,
     assignee: Optional[str] = None,
     constituency: Optional[str] = None,
+    month: Optional[str] = None,
     current_admin: dict = Depends(get_current_admin)
 ):
     """
@@ -1863,7 +1870,8 @@ def get_namma_mla_wards_performance(
         "status": status,
         "priority": priority,
         "assignee": assignee,
-        "constituency": constituency
+        "constituency": constituency,
+        "month": month
     }
     try:
         wards = namma_mla_analytics.get_ward_performance(filters)
@@ -1896,6 +1904,7 @@ def export_namma_mla_complaints_csv(
     constituency: Optional[str] = None,
     search_id: Optional[str] = None,
     search_citizen: Optional[str] = None,
+    month: Optional[str] = None,
     current_admin: dict = Depends(get_current_admin)
 ):
     """
@@ -1915,7 +1924,8 @@ def export_namma_mla_complaints_csv(
         "assignee": assignee,
         "constituency": constituency,
         "search_id": search_id,
-        "search_citizen": search_citizen
+        "search_citizen": search_citizen,
+        "month": month
     }
     
     try:

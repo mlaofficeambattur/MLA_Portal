@@ -402,6 +402,13 @@ def build_filter_clause(filters: Dict[str, Any]) -> tuple:
         params.append(search_val)
         params.append(search_val)
         
+    if filters.get("month"):
+        try:
+            clauses.append("EXTRACT(MONTH FROM created_at) = %s")
+            params.append(int(filters["month"]))
+        except ValueError:
+            pass
+        
     where_sql = " AND ".join(clauses)
     if where_sql:
         where_sql = "WHERE " + where_sql

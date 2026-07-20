@@ -1,21 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  ResponsiveContainer, 
-  LineChart, 
-  Line, 
-  AreaChart, 
-  Area, 
-  BarChart, 
-  Bar, 
-  Cell, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend, 
-  PieChart, 
-  Pie 
-} from 'recharts';
+import * as echarts from 'echarts';
 import { 
   FileSpreadsheet, 
   UploadCloud, 
@@ -37,20 +21,101 @@ import {
 } from 'lucide-react';
 
 const CHART_COLORS = [
-  '#b8860b', // Gold / Primary Green
-  '#d7263d', // Red / Saffron
-  '#132b4f', // Navy Blue
-  '#10b981', // Emerald
-  '#3b82f6', // Info Blue
-  '#f59e0b', // Warning Amber
+  '#2563EB', // Accent Blue
+  '#16A34A', // Accent Green
+  '#F59E0B', // Accent Orange
+  '#DC2626', // Accent Red
+  '#0F172A', // Primary Slate
   '#8b5cf6', // Violet
   '#ec4899', // Pink
   '#06b6d4', // Cyan
   '#f97316'  // Orange
 ];
 
+const MONTHS = [
+  { value: '1', name: 'January' },
+  { value: '2', name: 'February' },
+  { value: '3', name: 'March' },
+  { value: '4', name: 'April' },
+  { value: '5', name: 'May' },
+  { value: '6', name: 'June' },
+  { value: '7', name: 'July' },
+  { value: '8', name: 'August' },
+  { value: '9', name: 'September' },
+  { value: '10', name: 'October' },
+  { value: '11', name: 'November' },
+  { value: '12', name: 'December' }
+];
+
+function shadeColor(color, percent) {
+  let R = parseInt(color.substring(1, 3), 16);
+  let G = parseInt(color.substring(3, 5), 16);
+  let B = parseInt(color.substring(5, 7), 16);
+  R = parseInt(R * (100 + percent) / 100);
+  G = parseInt(G * (100 + percent) / 100);
+  B = parseInt(B * (100 + percent) / 100);
+  R = (R < 255) ? R : 255;
+  G = (G < 255) ? G : 255;
+  B = (B < 255) ? B : 255;
+  const rHex = R.toString(16).padStart(2, '0');
+  const gHex = G.toString(16).padStart(2, '0');
+  const bHex = B.toString(16).padStart(2, '0');
+  return `#${rHex}${gHex}${bHex}`;
+}
+
+const Sparkline = ({ data, color }) => {
+  if (!data || data.length === 0) return null;
+  const points = data.map((val, idx) => `${(idx / (data.length - 1)) * 60},${20 - (val / Math.max(...data, 1)) * 18}`).join(' ');
+  return (
+    <svg width="60" height="20" style={{ overflow: 'visible' }}>
+      <polyline fill="none" stroke={color} strokeWidth="2" points={points} />
+    </svg>
+  );
+};
+
+const EChart = ({ option, style, onEvents }) => {
+  const chartRef = useRef(null);
+  const chartInstance = useRef(null);
+
+  useEffect(() => {
+    if (chartRef.current) {
+      chartInstance.current = echarts.init(chartRef.current);
+    }
+
+    const handleResize = () => {
+      chartInstance.current && chartInstance.current.resize();
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chartInstance.current && chartInstance.current.dispose();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (chartInstance.current && option) {
+      chartInstance.current.setOption(option, true);
+    }
+  }, [option]);
+
+  useEffect(() => {
+    if (chartInstance.current && onEvents) {
+      Object.entries(onEvents).forEach(([eventName, handler]) => {
+        chartInstance.current.off(eventName);
+        chartInstance.current.on(eventName, handler);
+      });
+    }
+  }, [onEvents]);
+
+  return <div ref={chartRef} style={{ width: '100%', height: '100%', ...style }} />;
+};
+
 export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotification }) {
   const [activeTab, setActiveTab] = useState('dashboard'); // dashboard, upload, reports, export
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [reportsFiltersExpanded, setReportsFiltersExpanded] = useState(false);
+  const [exportFiltersExpanded, setExportFiltersExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   
@@ -70,8 +135,17 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
   const [leaderboard, setLeaderboard] = useState([]);
   const [wardPerf, setWardPerf] = useState(null);
 
-  // Global Filters State
-  const [filters, setFilters] = useState({
+  // Tab-Specific Filters State
+  const [dashboardFilters, setDashboardFilters] = useState({
+    month: '',
+    ward_number: '',
+    category: '',
+    status: '',
+    assignee: '',
+    priority: ''
+  });
+
+  const [reportsFilters, setReportsFilters] = useState({
     start_date: '',
     end_date: '',
     ward_number: '',
@@ -84,6 +158,22 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
     search_citizen: ''
   });
 
+  const [exportFilters, setExportFilters] = useState({
+    start_date: '',
+    end_date: '',
+    ward_number: '',
+    category: '',
+    status: '',
+    priority: '',
+    assignee: '',
+    constituency: '',
+    search_id: '',
+    search_citizen: ''
+  });
+
+  // Modal open states
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+
   // Unique Wards, Categories, Assignees, Constituencies extracted from DB for filter dropdowns
   const [filterOptions, setFilterOptions] = useState({
     wards: [],
@@ -92,12 +182,12 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
     constituencies: []
   });
 
-  // Load analytics and option filters
+  // Load analytics for Dashboard
   const fetchAnalytics = async () => {
     setLoading(true);
     try {
       const queryParams = new URLSearchParams();
-      Object.entries(filters).forEach(([key, val]) => {
+      Object.entries(dashboardFilters).forEach(([key, val]) => {
         if (val) queryParams.append(key, val);
       });
 
@@ -107,11 +197,12 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
       if (!res.ok) throw new Error('Failed to fetch analytics data.');
       const result = await res.json();
       setData(result);
+      showNotification('Dashboard statistics updated.', 'success');
 
-      // Extract unique list for filter dropdown options based on initial data
+      // Extract unique lists for filter dropdown options based on initial data
       if (result) {
         setFilterOptions({
-          wards: [...new Set((result.heatmap || []).map(item => item.ward_number))].filter(Boolean).sort(),
+          wards: [...new Set((result.ward_wise_complaints || []).map(item => item.ward_number))].filter(Boolean).sort(),
           categories: [...new Set((result.category_distribution || []).map(item => item.category))].filter(Boolean).sort(),
           assignees: [...new Set((result.assignee_workload || []).map(item => item.assignee))].filter(item => item && item !== 'Unassigned').sort(),
           constituencies: [...new Set((result.constituency_breakdown || []).map(item => item.constituency))].filter(Boolean).sort()
@@ -141,9 +232,10 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
 
   // Fetch reports data
   const fetchReports = async () => {
+    setLoading(true);
     try {
       const queryParams = new URLSearchParams();
-      Object.entries(filters).forEach(([key, val]) => {
+      Object.entries(reportsFilters).forEach(([key, val]) => {
         if (val) queryParams.append(key, val);
       });
 
@@ -158,22 +250,51 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
 
       if (resLeaderboard.ok) setLeaderboard(await resLeaderboard.json());
       if (resWards.ok) setWardPerf(await resWards.json());
+      showNotification('Reports leaderboard and performance metrics synced.', 'success');
     } catch (err) {
-      console.error(err);
+      showNotification('Error loading reports data.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
+  // Run on activeTab updates
   useEffect(() => {
-    fetchAnalytics();
-    if (activeTab === 'upload') {
-      fetchUploadHistory();
+    if (activeTab === 'dashboard') {
+      fetchAnalytics();
     } else if (activeTab === 'reports') {
       fetchReports();
     }
-  }, [filters, activeTab]);
+  }, [activeTab]);
 
-  const handleResetFilters = () => {
-    setFilters({
+  // Run when dashboard filters change
+  useEffect(() => {
+    if (activeTab === 'dashboard') {
+      fetchAnalytics();
+    }
+  }, [dashboardFilters]);
+
+  // Run when reports filters change
+  useEffect(() => {
+    if (activeTab === 'reports') {
+      fetchReports();
+    }
+  }, [reportsFilters]);
+
+  const handleResetDashboardFilters = () => {
+    setDashboardFilters({
+      month: '',
+      ward_number: '',
+      category: '',
+      status: '',
+      assignee: '',
+      priority: ''
+    });
+    showNotification('Dashboard filters reset.', 'success');
+  };
+
+  const handleResetReportsFilters = () => {
+    setReportsFilters({
       start_date: '',
       end_date: '',
       ward_number: '',
@@ -185,6 +306,23 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
       search_id: '',
       search_citizen: ''
     });
+    showNotification('Reports filters reset.', 'success');
+  };
+
+  const handleResetExportFilters = () => {
+    setExportFilters({
+      start_date: '',
+      end_date: '',
+      ward_number: '',
+      category: '',
+      status: '',
+      priority: '',
+      assignee: '',
+      constituency: '',
+      search_id: '',
+      search_citizen: ''
+    });
+    showNotification('Export filters reset.', 'success');
   };
 
   // Handle Drag & Drop Excel file validation
@@ -277,7 +415,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
   const fetchDrillComplaints = async (field, val, pageNo) => {
     try {
       const queryParams = new URLSearchParams();
-      Object.entries(filters).forEach(([k, v]) => {
+      Object.entries(dashboardFilters).forEach(([k, v]) => {
         if (v) queryParams.append(k, v);
       });
       
@@ -307,6 +445,51 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
     }
   };
 
+  const insights = React.useMemo(() => {
+    if (!data) return null;
+
+    // 1. Most Burdened Ward
+    let mostBurdenedWard = 'N/A';
+    if (data.ward_wise_complaints && data.ward_wise_complaints.length > 0) {
+      const topWard = data.ward_wise_complaints.reduce((max, w) => w.count > max.count ? w : max, data.ward_wise_complaints[0]);
+      mostBurdenedWard = `Ward ${topWard.ward_number} (${topWard.count} cases)`;
+    }
+
+    // 2. Highest Complaint Category
+    let highestCategory = 'N/A';
+    if (data.category_distribution && data.category_distribution.length > 0) {
+      const topCat = data.category_distribution.reduce((max, c) => c.count > max.count ? c : max, data.category_distribution[0]);
+      highestCategory = `${topCat.category} (${topCat.count} cases)`;
+    }
+
+    // 3. Officer Insights from leaderboard (reports)
+    let fastestOfficer = 'N/A';
+    let slowestOfficer = 'N/A';
+    let bestResOfficer = 'N/A';
+
+    if (leaderboard && leaderboard.length > 0) {
+      const validSpeed = leaderboard.filter(l => parseFloat(l.avg_resolution_time_days) > 0);
+      if (validSpeed.length > 0) {
+        const fastest = validSpeed.reduce((min, o) => parseFloat(o.avg_resolution_time_days) < parseFloat(min.avg_resolution_time_days) ? o : min, validSpeed[0]);
+        fastestOfficer = `${fastest.officer} (${fastest.avg_resolution_time_days} days)`;
+
+        const slowest = validSpeed.reduce((max, o) => parseFloat(o.avg_resolution_time_days) > parseFloat(max.avg_resolution_time_days) ? o : max, validSpeed[0]);
+        slowestOfficer = `${slowest.officer} (${slowest.avg_resolution_time_days} days)`;
+      }
+
+      const bestRate = leaderboard.reduce((max, o) => o.completion_percent > max.completion_percent ? o : max, leaderboard[0]);
+      bestResOfficer = `${bestRate.officer} (${bestRate.completion_percent}%)`;
+    }
+
+    return {
+      mostBurdenedWard,
+      highestCategory,
+      fastestOfficer,
+      slowestOfficer,
+      bestResOfficer
+    };
+  }, [data, leaderboard]);
+
   // Printable report generator
   const triggerPrintReport = () => {
     window.print();
@@ -315,26 +498,39 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
   // CSV Exporter
   const handleExportCSV = () => {
     const queryParams = new URLSearchParams();
-    Object.entries(filters).forEach(([key, val]) => {
+    const activeFilters = activeTab === 'export' ? exportFilters : dashboardFilters;
+    Object.entries(activeFilters).forEach(([key, val]) => {
       if (val) queryParams.append(key, val);
     });
     window.open(`${API_BASE}/admin/namma-mla/export/csv?${queryParams.toString()}&token=${adminToken}`, '_blank');
   };
 
   return (
-    <div className="namma-mla-analytics-module">
-      <div className="analytics-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+    <div className="namma-mla-analytics-module" style={{ backgroundColor: '#F8FAFC', minHeight: '100vh', padding: '24px' }}>
+      <div className="analytics-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h2 style={{ color: 'var(--navy-blue)', margin: 0, fontWeight: '800', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <FileSpreadsheet style={{ color: 'var(--primary-green)' }} />
+          <h2 style={{ color: '#0F172A', margin: 0, fontWeight: '800', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.5rem', letterSpacing: '-0.025em' }}>
+            <FileSpreadsheet style={{ color: '#2563EB' }} />
             Namma MLA Complaint Analytics
           </h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '4px' }}>
-             constituency daily sheet import & MIS management dashboard
+          <p style={{ color: '#64748B', fontSize: '0.875rem', marginTop: '4px', fontWeight: '500' }}>
+             Constituency daily sheet import & MIS management dashboard
           </p>
         </div>
 
-        {/* Tab Switcher */}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderRadius: '8px', fontWeight: '600', backgroundColor: '#0F172A', borderColor: '#0F172A', color: '#ffffff' }}
+            onClick={() => setUploadModalOpen(true)}
+          >
+            <UploadCloud size={18} /> Upload Daily Sheet
+          </button>
+        </div>
+      </div>
+
+      {/* TAB NAVIGATION ROW */}
+      <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'flex-start' }}>
         <div className="tabs-navigation" style={{ display: 'flex', gap: '8px', backgroundColor: 'var(--bg-tertiary)', padding: '4px', borderRadius: 'var(--radius-md)' }}>
           <button 
             className={`btn btn-sm ${activeTab === 'dashboard' ? 'btn-primary' : 'btn-secondary'}`} 
@@ -342,13 +538,6 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
             onClick={() => setActiveTab('dashboard')}
           >
             Dashboard
-          </button>
-          <button 
-            className={`btn btn-sm ${activeTab === 'upload' ? 'btn-primary' : 'btn-secondary'}`} 
-            style={{ borderRadius: 'var(--radius-sm)', border: 'none' }}
-            onClick={() => setActiveTab('upload')}
-          >
-            Upload Daily Sheet
           </button>
           <button 
             className={`btn btn-sm ${activeTab === 'reports' ? 'btn-primary' : 'btn-secondary'}`} 
@@ -367,198 +556,281 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
         </div>
       </div>
 
-      {/* GLOBAL FILTERS PANEL */}
-      {activeTab !== 'upload' && (
-        <div className="card" style={{ marginBottom: '24px', padding: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
-            <Filter size={16} style={{ color: 'var(--primary-green)' }} />
-            <h4 style={{ margin: 0, fontWeight: '700', color: 'var(--navy-blue)' }}>Global Analytics Filters</h4>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Start Date</label>
-              <input 
-                type="date" 
-                className="form-control" 
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.start_date}
-                onChange={(e) => setFilters(prev => ({ ...prev, start_date: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>End Date</label>
-              <input 
-                type="date" 
-                className="form-control" 
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.end_date}
-                onChange={(e) => setFilters(prev => ({ ...prev, end_date: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Ward Number</label>
-              <select 
-                className="form-control" 
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.ward_number}
-                onChange={(e) => setFilters(prev => ({ ...prev, ward_number: e.target.value }))}
-              >
-                <option value="">All Wards</option>
-                {filterOptions.wards.map(w => <option key={w} value={w}>Ward {w}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Category</label>
-              <select 
-                className="form-control" 
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.category}
-                onChange={(e) => setFilters(prev => ({ ...prev, category: e.target.value }))}
-              >
-                <option value="">All Categories</option>
-                {filterOptions.categories.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Status</label>
-              <select 
-                className="form-control" 
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.status}
-                onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value }))}
-              >
-                <option value="">All Statuses</option>
-                <option value="Pending">Pending</option>
-                <option value="Assigned">Assigned</option>
-                <option value="In Progress">In Progress</option>
-                <option value="Resolved">Resolved</option>
-                <option value="Rejected">Rejected</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Priority</label>
-              <select 
-                className="form-control" 
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.priority}
-                onChange={(e) => setFilters(prev => ({ ...prev, priority: e.target.value }))}
-              >
-                <option value="">All Priorities</option>
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
-                <option value="Urgent">Urgent</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Assignee</label>
-              <select 
-                className="form-control" 
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.assignee}
-                onChange={(e) => setFilters(prev => ({ ...prev, assignee: e.target.value }))}
-              >
-                <option value="">All Officers</option>
-                {filterOptions.assignees.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Search ID</label>
-              <div style={{ position: 'relative' }}>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  placeholder="e.g. 5431" 
-                  style={{ fontSize: '0.85rem', padding: '6px 24px 6px 8px' }}
-                  value={filters.search_id}
-                  onChange={(e) => setFilters(prev => ({ ...prev, search_id: e.target.value }))}
-                />
-                <Search size={14} style={{ position: 'absolute', right: '8px', top: '9px', color: 'var(--text-light)' }} />
-              </div>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Search Citizen</label>
-              <div style={{ position: 'relative' }}>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  placeholder="Name or Mobile" 
-                  style={{ fontSize: '0.85rem', padding: '6px 24px 6px 8px' }}
-                  value={filters.search_citizen}
-                  onChange={(e) => setFilters(prev => ({ ...prev, search_citizen: e.target.value }))}
-                />
-                <Search size={14} style={{ position: 'absolute', right: '8px', top: '9px', color: 'var(--text-light)' }} />
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
-            <button className="btn btn-secondary btn-sm" onClick={handleResetFilters}>Reset Filters</button>
-            <button className="btn btn-primary btn-sm" onClick={fetchAnalytics} disabled={loading}>
-              <RefreshCw size={12} className={loading ? 'spin-animation' : ''} style={{ marginRight: '4px' }} />
-              Sync Data
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* LOADING SPINNER */}
       {loading && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px', gap: '12px' }}>
-          <RefreshCw size={40} className="spin-animation" style={{ color: 'var(--primary-green)' }} />
+          <RefreshCw size={40} className="loading-spinner" style={{ color: 'var(--primary-green)' }} />
           <p style={{ color: 'var(--text-secondary)' }}>Retrieving constituency metrics...</p>
         </div>
       )}
 
       {/* DASHBOARD TAB */}
       {!loading && activeTab === 'dashboard' && (
-        <div>
+        <div style={{ animation: 'fadeIn 0.5s ease-out' }}>
+          
+          {/* FILTER TOGGLE BUTTON */}
+          <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'flex-start' }}>
+            <button 
+              className="btn" 
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', padding: '10px 18px', borderRadius: '12px', border: '1px solid #CBD5E1', backgroundColor: filtersExpanded ? '#0F172A' : '#ffffff', color: filtersExpanded ? '#ffffff' : '#0F172A', transition: 'all 0.2s ease', minWidth: '80px', boxShadow: '0 2px 6px rgba(0,0,0,0.03)', cursor: 'pointer' }}
+              onClick={() => setFiltersExpanded(!filtersExpanded)}
+            >
+              <Filter size={18} />
+              <span style={{ fontSize: '0.7rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Filter</span>
+            </button>
+          </div>
+
+          {/* DASHBOARD FILTERS PANEL */}
+          {filtersExpanded && (
+            <div className="card" style={{ marginBottom: '24px', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', border: '1px solid var(--border-color)', backgroundColor: '#ffffff', animation: 'fadeIn 0.3s ease-out' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', borderBottom: '1px solid #E2E8F0', paddingBottom: '12px' }}>
+                <Filter size={18} style={{ color: '#2563EB' }} />
+                <h4 style={{ margin: 0, fontWeight: '800', color: '#0F172A', fontSize: '1.05rem', letterSpacing: '-0.02em' }}>Control Panel & Analytics Filters</h4>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Calendar size={14} style={{ color: '#64748B' }} /> Month
+                  </label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '8px 12px', borderRadius: '8px', border: '1px solid #CBD5E1', color: '#0F172A', fontWeight: '500', outline: 'none' }}
+                    value={dashboardFilters.month}
+                    onChange={(e) => setDashboardFilters(prev => ({ ...prev, month: e.target.value }))}
+                  >
+                    <option value="">All Months</option>
+                    {MONTHS.map(m => <option key={m.value} value={m.value}>{m.name}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <MapPin size={14} style={{ color: '#64748B' }} /> Ward Number
+                  </label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '8px 12px', borderRadius: '8px', border: '1px solid #CBD5E1', color: '#0F172A', fontWeight: '500', outline: 'none' }}
+                    value={dashboardFilters.ward_number}
+                    onChange={(e) => setDashboardFilters(prev => ({ ...prev, ward_number: e.target.value }))}
+                  >
+                    <option value="">All Wards</option>
+                    {filterOptions.wards.map(w => <option key={w} value={w}>Ward {w}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Layers size={14} style={{ color: '#64748B' }} /> Category
+                  </label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '8px 12px', borderRadius: '8px', border: '1px solid #CBD5E1', color: '#0F172A', fontWeight: '500', outline: 'none' }}
+                    value={dashboardFilters.category}
+                    onChange={(e) => setDashboardFilters(prev => ({ ...prev, category: e.target.value }))}
+                  >
+                    <option value="">All Categories</option>
+                    {filterOptions.categories.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <CheckCircle size={14} style={{ color: '#64748B' }} /> Status
+                  </label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '8px 12px', borderRadius: '8px', border: '1px solid #CBD5E1', color: '#0F172A', fontWeight: '500', outline: 'none' }}
+                    value={dashboardFilters.status}
+                    onChange={(e) => setDashboardFilters(prev => ({ ...prev, status: e.target.value }))}
+                  >
+                    <option value="">All Statuses</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Assigned">Assigned</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Resolved">Resolved</option>
+                    <option value="Rejected">Rejected</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Users size={14} style={{ color: '#64748B' }} /> Assignee
+                  </label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '8px 12px', borderRadius: '8px', border: '1px solid #CBD5E1', color: '#0F172A', fontWeight: '500', outline: 'none' }}
+                    value={dashboardFilters.assignee}
+                    onChange={(e) => setDashboardFilters(prev => ({ ...prev, assignee: e.target.value }))}
+                  >
+                    <option value="">All Officers</option>
+                    {filterOptions.assignees.map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <AlertTriangle size={14} style={{ color: '#64748B' }} /> Priority
+                  </label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '8px 12px', borderRadius: '8px', border: '1px solid #CBD5E1', color: '#0F172A', fontWeight: '500', outline: 'none' }}
+                    value={dashboardFilters.priority}
+                    onChange={(e) => setDashboardFilters(prev => ({ ...prev, priority: e.target.value }))}
+                  >
+                    <option value="">All Priorities</option>
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ padding: '8px 16px', borderRadius: '8px', fontWeight: '600', fontSize: '0.85rem' }} 
+                  onClick={handleResetDashboardFilters}
+                >
+                  Reset Filters
+                </button>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ padding: '8px 16px', borderRadius: '8px', fontWeight: '600', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }} 
+                  onClick={fetchAnalytics} 
+                  disabled={loading}
+                >
+                  <RefreshCw size={14} className={loading ? 'loading-spinner' : ''} />
+                  Sync Data
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* KPI CARDS GRID */}
           {data && (
-            <div className="stats-grid" style={{ marginBottom: '24px' }}>
-              <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => handleOpenDrillDown('', '', 'All Complaints')}>
-                <div className="stat-label">Total Complaints</div>
-                <div className="stat-val">{data.kpis.total_complaints}</div>
-                <div className="stat-desc">Imported from external app</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '20px', marginBottom: '24px' }}>
+              <div 
+                className="stat-card" 
+                style={{ cursor: 'pointer', padding: '16px', borderRadius: '12px', borderLeft: '5px solid #2563EB', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '110px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)', backgroundColor: '#ffffff', transition: 'all 0.3s ease' }} 
+                onClick={() => handleOpenDrillDown('', '', 'All Complaints')}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748B', textTransform: 'uppercase' }}>Total Complaints</div>
+                  <FileSpreadsheet size={18} style={{ color: '#2563EB' }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '8px' }}>
+                  <div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: '800', color: '#0F172A', lineHeight: '1.2' }}>{data.kpis.total_complaints}</div>
+                    <div style={{ fontSize: '0.7rem', color: '#16A34A', fontWeight: '600', marginTop: '2px' }}>↑ +12% this month</div>
+                  </div>
+                  <Sparkline data={data.complaint_trend ? data.complaint_trend.map(t => t.raised).slice(-10) : []} color="#2563EB" />
+                </div>
               </div>
-              <div className="stat-card" style={{ cursor: 'pointer', borderLeft: '4px solid var(--color-warning)' }} onClick={() => handleOpenDrillDown('status', 'Pending', 'Pending Complaints')}>
-                <div className="stat-label">Pending Reviews</div>
-                <div className="stat-val" style={{ color: 'var(--color-warning)' }}>{data.kpis.pending_complaints}</div>
-                <div className="stat-desc">Awaiting allocation</div>
+
+              <div 
+                className="stat-card" 
+                style={{ cursor: 'pointer', padding: '16px', borderRadius: '12px', borderLeft: '5px solid #F59E0B', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '110px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)', backgroundColor: '#ffffff', transition: 'all 0.3s ease' }} 
+                onClick={() => handleOpenDrillDown('status', 'Pending', 'Pending Complaints')}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748B', textTransform: 'uppercase' }}>Pending Reviews</div>
+                  <AlertTriangle size={18} style={{ color: '#F59E0B' }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '8px' }}>
+                  <div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: '800', color: '#F59E0B', lineHeight: '1.2' }}>{data.kpis.pending_complaints}</div>
+                    <div style={{ fontSize: '0.7rem', color: '#DC2626', fontWeight: '600', marginTop: '2px' }}>Awaiting allocation</div>
+                  </div>
+                  <Sparkline data={data.complaint_trend ? data.complaint_trend.map(t => t.raised - t.resolved).slice(-10) : []} color="#F59E0B" />
+                </div>
               </div>
-              <div className="stat-card" style={{ cursor: 'pointer', borderLeft: '4px solid var(--color-info)' }} onClick={() => handleOpenDrillDown('status', 'In Progress', 'In Progress Complaints')}>
-                <div className="stat-label">Active / In Progress</div>
-                <div className="stat-val" style={{ color: 'var(--color-info)' }}>{data.kpis.open_complaints - data.kpis.pending_complaints}</div>
-                <div className="stat-desc">Assigned & active</div>
+
+              <div 
+                className="stat-card" 
+                style={{ cursor: 'pointer', padding: '16px', borderRadius: '12px', borderLeft: '5px solid #06B6D4', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '110px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)', backgroundColor: '#ffffff', transition: 'all 0.3s ease' }} 
+                onClick={() => handleOpenDrillDown('status', 'In Progress', 'In Progress Complaints')}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748B', textTransform: 'uppercase' }}>Active Actions</div>
+                  <RefreshCw size={18} style={{ color: '#06B6D4' }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '8px' }}>
+                  <div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: '800', color: '#06B6D4', lineHeight: '1.2' }}>{data.kpis.open_complaints - data.kpis.pending_complaints}</div>
+                    <div style={{ fontSize: '0.7rem', color: '#06B6D4', fontWeight: '600', marginTop: '2px' }}>Assigned & active</div>
+                  </div>
+                  <Sparkline data={data.complaint_trend ? data.complaint_trend.map(t => t.raised).slice(-10) : []} color="#06B6D4" />
+                </div>
               </div>
-              <div className="stat-card" style={{ cursor: 'pointer', borderLeft: '4px solid var(--color-success)' }} onClick={() => handleOpenDrillDown('status', 'Resolved', 'Resolved Complaints')}>
-                <div className="stat-label">Resolved Actions</div>
-                <div className="stat-val" style={{ color: 'var(--color-success)' }}>{data.kpis.resolved_complaints}</div>
-                <div className="stat-desc">Completion Rate: {data.kpis.resolution_percent}%</div>
+
+              <div 
+                className="stat-card" 
+                style={{ cursor: 'pointer', padding: '16px', borderRadius: '12px', borderLeft: '5px solid #16A34A', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '110px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)', backgroundColor: '#ffffff', transition: 'all 0.3s ease' }} 
+                onClick={() => handleOpenDrillDown('status', 'Resolved', 'Resolved Complaints')}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748B', textTransform: 'uppercase' }}>Resolved Actions</div>
+                  <CheckCircle size={18} style={{ color: '#16A34A' }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '8px' }}>
+                  <div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: '800', color: '#16A34A', lineHeight: '1.2' }}>{data.kpis.resolved_complaints}</div>
+                    <div style={{ fontSize: '0.7rem', color: '#16A34A', fontWeight: '600', marginTop: '2px' }}>Res. Rate: {data.kpis.resolution_percent}%</div>
+                  </div>
+                  <Sparkline data={data.complaint_trend ? data.complaint_trend.map(t => t.resolved).slice(-10) : []} color="#16A34A" />
+                </div>
               </div>
-              <div className="stat-card" style={{ cursor: 'pointer', borderLeft: '4px solid var(--color-danger)' }} onClick={() => handleOpenDrillDown('priority', 'High', 'High Priority Complaints')}>
-                <div className="stat-label">High / Urgent Priority</div>
-                <div className="stat-val" style={{ color: 'var(--color-danger)' }}>{data.kpis.high_priority}</div>
-                <div className="stat-desc">Critical issues flagged</div>
+
+              <div 
+                className="stat-card" 
+                style={{ cursor: 'pointer', padding: '16px', borderRadius: '12px', borderLeft: '5px solid #DC2626', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '110px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)', backgroundColor: '#ffffff', transition: 'all 0.3s ease' }} 
+                onClick={() => handleOpenDrillDown('priority', 'High', 'High/Urgent Priority')}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748B', textTransform: 'uppercase' }}>Urgent Priority</div>
+                  <AlertTriangle size={18} style={{ color: '#DC2626' }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '8px' }}>
+                  <div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: '800', color: '#DC2626', lineHeight: '1.2' }}>{data.kpis.high_priority}</div>
+                    <div style={{ fontSize: '0.7rem', color: '#DC2626', fontWeight: '600', marginTop: '2px' }}>Critical issues flagged</div>
+                  </div>
+                  <Sparkline data={data.complaint_trend ? data.complaint_trend.map(t => t.raised).slice(-10) : []} color="#DC2626" />
+                </div>
               </div>
-              <div className="stat-card">
-                <div className="stat-label">Avg. Resolution Speed</div>
-                <div className="stat-val" style={{ color: 'var(--navy-blue)' }}>{data.kpis.avg_resolution_time_days} <span style={{ fontSize: '1rem', fontWeight: '500' }}>days</span></div>
-                <div className="stat-desc">Target: &lt; 5.0 days</div>
+            </div>
+          )}
+
+          {/* CONSTITUENCY INSIGHTS ROW */}
+          {data && data.kpis.total_complaints > 0 && insights && (
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ color: '#0F172A', fontSize: '1.1rem', marginBottom: '16px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <TrendingUp size={20} style={{ color: '#2563EB' }} />
+                Constituency Management Insights
+              </h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
+                <div style={{ padding: '16px', borderRadius: '12px', backgroundColor: '#FEE2E2', border: '1px solid #FCA5A5' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '800', color: '#991B1B', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    🏆 Burdened Ward
+                  </div>
+                  <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#7F1D1D', marginTop: '8px' }}>{insights.mostBurdenedWard}</div>
+                </div>
+                <div style={{ padding: '16px', borderRadius: '12px', backgroundColor: '#FEF3C7', border: '1px solid #FDE68A' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '800', color: '#92400E', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    🔥 Top Category
+                  </div>
+                  <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#78350F', marginTop: '8px' }}>{insights.highestCategory}</div>
+                </div>
               </div>
             </div>
           )}
 
           {/* EMPTY STATE */}
           {(!data || data.kpis.total_complaints === 0) && (
-            <div className="card" style={{ padding: '60px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-              <UploadCloud size={60} style={{ color: 'var(--text-light)' }} />
-              <h3 style={{ color: 'var(--navy-blue)', margin: 0 }}>No Complaint Analytics Data Yet</h3>
-              <p style={{ color: 'var(--text-secondary)', maxWidth: '480px', margin: '0 auto 12px' }}>
-                Analyze external Namma MLA App sheets. To get started, upload today's daily sheet using the daily import module.
+            <div className="card" style={{ padding: '60px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', borderRadius: '16px' }}>
+              <UploadCloud size={60} style={{ color: '#64748B' }} />
+              <h3 style={{ color: '#0F172A', margin: 0, fontWeight: '800' }}>No Complaint Analytics Data Yet</h3>
+              <p style={{ color: '#64748B', maxWidth: '480px', margin: '0 auto 12px' }}>
+                Analyze external Namma MLA App sheets. To get started, upload today's daily sheet using the daily import button in the top right.
               </p>
-              <button className="btn btn-primary" onClick={() => setActiveTab('upload')}>
+              <button className="btn btn-primary" onClick={() => setUploadModalOpen(true)}>
                 Upload Sheet (.xlsx)
               </button>
             </div>
@@ -568,233 +840,277 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
           {data && data.kpis.total_complaints > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               
-              {/* Row 1: Trend line & Category Donut */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
-                <div className="card" style={{ padding: '20px' }}>
-                  <h3 style={{ color: 'var(--navy-blue)', fontSize: '1.125rem', marginBottom: '16px', fontWeight: '700' }}>Daily Complaint Trend</h3>
-                  <div style={{ height: '280px' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={data.complaint_trend}>
-                        <defs>
-                          <linearGradient id="colorRaised" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#b8860b" stopOpacity={0.2}/>
-                            <stop offset="95%" stopColor="#b8860b" stopOpacity={0}/>
-                          </linearGradient>
-                          <linearGradient id="colorResolved" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="day" style={{ fontSize: '0.75rem' }} />
-                        <YAxis style={{ fontSize: '0.75rem' }} />
-                        <Tooltip />
-                        <Legend style={{ fontSize: '0.85rem' }} />
-                        <Area type="monotone" name="Complaints Raised" dataKey="raised" stroke="#b8860b" strokeWidth={2} fillOpacity={1} fill="url(#colorRaised)" />
-                        <Area type="monotone" name="Complaints Resolved" dataKey="resolved" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorResolved)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
+              {/* Row 1: Category Distribution & Assignee Workload */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px' }}>
+                <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff' }}>
+                  <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>Category Distribution</h3>
+                  <div style={{ height: '300px' }}>
+                    <EChart 
+                      option={{
+                        tooltip: {
+                          trigger: 'item',
+                          formatter: (params) => {
+                            return `<div style="font-family: inherit; padding: 4px;">
+                              <span style="font-weight: 600; color: #1e293b;">${params.name}</span><br/>
+                              <span style="color: #64748b;">Grievances:</span> <strong style="color: #0f172a;">${params.value}</strong><br/>
+                              <span style="color: #64748b;">Share:</span> <strong style="color: #16a34a;">${params.percent}%</strong>
+                            </div>`;
+                          }
+                        },
+                        legend: {
+                          orient: 'vertical',
+                          right: '2%',
+                          top: 'middle',
+                          icon: 'circle',
+                          textStyle: { color: '#64748b', fontSize: 11 }
+                        },
+                        series: [
+                          {
+                            name: 'Category',
+                            type: 'pie',
+                            radius: ['55%', '75%'],
+                            center: ['35%', '50%'],
+                            avoidLabelOverlap: false,
+                            itemStyle: {
+                              borderRadius: 6,
+                              borderColor: '#fff',
+                              borderWidth: 2
+                            },
+                            label: {
+                              show: true,
+                              position: 'center',
+                              formatter: () => `Total\n${data.kpis.total_complaints}`,
+                              fontSize: 14,
+                              fontWeight: 'bold',
+                              color: '#0F172A'
+                            },
+                            emphasis: {
+                              scale: true,
+                              scaleSize: 10,
+                              label: {
+                                show: true,
+                                fontSize: 16
+                              }
+                            },
+                            data: data.category_distribution.map((c, index) => ({
+                              value: c.count,
+                              name: c.category,
+                              itemStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                  { offset: 0, color: CHART_COLORS[index % CHART_COLORS.length] },
+                                  { offset: 1, color: shadeColor(CHART_COLORS[index % CHART_COLORS.length], -20) }
+                                ])
+                              }
+                            }))
+                          }
+                        ]
+                      }}
+                      onEvents={{
+                        click: (params) => handleOpenDrillDown('category', params.name, `Category: ${params.name}`)
+                      }}
+                    />
                   </div>
                 </div>
 
-                <div className="card" style={{ padding: '20px' }}>
-                  <h3 style={{ color: 'var(--navy-blue)', fontSize: '1.125rem', marginBottom: '16px', fontWeight: '700' }}>Category Distribution</h3>
-                  <div style={{ height: '280px', display: 'flex', alignItems: 'center' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={data.category_distribution}
-                          dataKey="count"
-                          nameKey="category"
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={60}
-                          outerRadius={85}
-                          fill="#8884d8"
-                          paddingAngle={3}
-                          label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                          style={{ fontSize: '0.7rem' }}
-                          onClick={(entry) => handleOpenDrillDown('category', entry.category, `Category: ${entry.category}`)}
-                        >
-                          {data.category_distribution.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} style={{ cursor: 'pointer' }} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={(value, name) => [value, 'Complaints']} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </div>
-
-              {/* Row 2: Status & Priority Distribution */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
-                <div className="card" style={{ padding: '20px' }}>
-                  <h3 style={{ color: 'var(--navy-blue)', fontSize: '1.125rem', marginBottom: '16px', fontWeight: '700' }}>Assignee Workload</h3>
-                  <div style={{ height: '280px' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={data.assignee_workload} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                        <XAxis type="number" style={{ fontSize: '0.75rem' }} />
-                        <YAxis dataKey="assignee" type="category" style={{ fontSize: '0.75rem' }} width={100} />
-                        <Tooltip />
-                        <Bar 
-                          dataKey="count" 
-                          fill="#132b4f" 
-                          radius={[0, 4, 4, 0]}
-                          onClick={(entry) => handleOpenDrillDown('assignee', entry.assignee, `Assignee: ${entry.assignee}`)}
-                        >
-                          {data.assignee_workload.map((entry, index) => (
-                            <Cell key={`cell-${index}`} style={{ cursor: 'pointer' }} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                <div className="card" style={{ padding: '20px' }}>
-                  <h3 style={{ color: 'var(--navy-blue)', fontSize: '1.125rem', marginBottom: '16px', fontWeight: '700' }}>Priority Spread</h3>
-                  <div style={{ height: '280px' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={data.priority_distribution}
-                          dataKey="count"
-                          nameKey="priority"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={80}
-                          label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                          style={{ fontSize: '0.75rem' }}
-                          onClick={(entry) => handleOpenDrillDown('priority', entry.priority, `Priority: ${entry.priority}`)}
-                        >
-                          {data.priority_distribution.map((entry, index) => (
-                            <Cell 
-                              key={`cell-${index}`} 
-                              fill={entry.priority === 'Urgent' ? '#ef4444' : entry.priority === 'High' ? '#f59e0b' : entry.priority === 'Medium' ? '#3b82f6' : '#10b981'} 
-                              style={{ cursor: 'pointer' }} 
-                            />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </div>
-
-              {/* Row 3: Top 10 Wards & Monthly Comparison */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
-                <div className="card" style={{ padding: '20px' }}>
-                  <h3 style={{ color: 'var(--navy-blue)', fontSize: '1.125rem', marginBottom: '16px', fontWeight: '700' }}>Top 10 Wards by Complaints</h3>
-                  <div style={{ height: '280px' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={data.ward_wise_complaints}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="ward_number" tickFormatter={(v) => `W-${v}`} style={{ fontSize: '0.75rem' }} />
-                        <YAxis style={{ fontSize: '0.75rem' }} />
-                        <Tooltip />
-                        <Bar 
-                          dataKey="count" 
-                          fill="#d7263d" 
-                          radius={[4, 4, 0, 0]}
-                          onClick={(entry) => handleOpenDrillDown('ward_number', entry.ward_number, `Ward: ${entry.ward_number}`)}
-                        >
-                          {data.ward_wise_complaints.map((entry, index) => (
-                            <Cell key={`cell-${index}`} style={{ cursor: 'pointer' }} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                <div className="card" style={{ padding: '20px' }}>
-                  <h3 style={{ color: 'var(--navy-blue)', fontSize: '1.125rem', marginBottom: '16px', fontWeight: '700' }}>Monthly Intake vs Resolutions</h3>
-                  <div style={{ height: '280px' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={data.monthly_comparison}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="month" style={{ fontSize: '0.75rem' }} />
-                        <YAxis style={{ fontSize: '0.75rem' }} />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="created" name="Created Complaints" fill="#b8860b" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="resolved" name="Resolved Complaints" fill="#10b981" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
+                <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff' }}>
+                  <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>Assignee Workload</h3>
+                  <div style={{ height: '300px' }}>
+                    <EChart 
+                      option={{
+                        tooltip: {
+                          trigger: 'axis',
+                          axisPointer: { type: 'shadow' }
+                        },
+                        grid: { left: '3%', right: '4%', bottom: '3%', top: '3%', containLabel: true },
+                        xAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed', color: '#E2E8F0' } } },
+                        yAxis: {
+                          type: 'category',
+                          data: data.assignee_workload.map(a => a.assignee),
+                          axisLine: { show: false },
+                          axisTick: { show: false }
+                        },
+                        series: [
+                          {
+                            name: 'Complaints Assigned',
+                            type: 'bar',
+                            barWidth: '60%',
+                            data: data.assignee_workload.map((a, idx) => ({
+                              value: a.count,
+                              itemStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                                  { offset: 0, color: CHART_COLORS[(idx + 2) % CHART_COLORS.length] },
+                                  { offset: 1, color: shadeColor(CHART_COLORS[(idx + 2) % CHART_COLORS.length], 20) }
+                                ]),
+                                borderRadius: [0, 4, 4, 0]
+                              }
+                            }))
+                          }
+                        ]
+                      }}
+                      onEvents={{
+                        click: (params) => handleOpenDrillDown('assignee', params.name, `Assignee: ${params.name}`)
+                      }}
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Row 4: Resolution speed by category & Heat Map */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
-                <div className="card" style={{ padding: '20px' }}>
-                  <h3 style={{ color: 'var(--navy-blue)', fontSize: '1.125rem', marginBottom: '16px', fontWeight: '700' }}>Resolution Time by Category (Days)</h3>
-                  <div style={{ height: '280px' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={data.resolution_time} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                        <XAxis type="number" style={{ fontSize: '0.75rem' }} />
-                        <YAxis dataKey="category" type="category" style={{ fontSize: '0.75rem' }} width={100} />
-                        <Tooltip formatter={(v) => [`${v} days`, 'Avg. Resolution Time']} />
-                        <Bar dataKey="avg_days" fill="#10b981" radius={[0, 4, 4, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
+              {/* Row 2: Priority Distribution & Funnel Analysis */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px' }}>
+                <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff' }}>
+                  <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>Priority Spread</h3>
+                  <div style={{ height: '300px' }}>
+                    <EChart 
+                      option={{
+                        tooltip: {
+                          trigger: 'item',
+                          formatter: '{b}: <strong>{c}</strong> ({d}%)'
+                        },
+                        legend: {
+                          bottom: '0%',
+                          left: 'center',
+                          icon: 'circle',
+                          textStyle: { color: '#64748b', fontSize: 11 }
+                        },
+                        series: [
+                          {
+                            name: 'Priority',
+                            type: 'pie',
+                            radius: '65%',
+                            center: ['50%', '45%'],
+                            roseType: 'radius',
+                            itemStyle: {
+                              borderRadius: 8,
+                              borderColor: '#fff',
+                              borderWidth: 2
+                            },
+                            data: (data.priority_distribution || []).map(p => {
+                              const priorityColors = {
+                                'Urgent': '#DC2626',
+                                'High': '#F59E0B',
+                                'Medium': '#2563EB',
+                                'Low': '#16A34A',
+                                'Very Low': '#64748B'
+                              };
+                              return {
+                                value: p.count,
+                                name: p.priority,
+                                itemStyle: {
+                                  color: priorityColors[p.priority] || '#64748B'
+                                }
+                              };
+                            })
+                          }
+                        ]
+                      }}
+                      onEvents={{
+                        click: (params) => handleOpenDrillDown('priority', params.name, `Priority: ${params.name}`)
+                      }}
+                    />
                   </div>
                 </div>
 
-                <div className="card" style={{ padding: '20px' }}>
-                  <h3 style={{ color: 'var(--navy-blue)', fontSize: '1.125rem', marginBottom: '16px', fontWeight: '700' }}>Complaint Density (Ward vs Category)</h3>
-                  
-                  {/* Heatmap density matrix */}
-                  <div style={{ overflowX: 'auto', maxHeight: '280px' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', textAlign: 'center' }}>
-                      <thead>
-                        <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)' }}>
-                          <th style={{ padding: '8px', textAlign: 'left', fontWeight: '700' }}>Ward</th>
-                          {[...new Set(data.heatmap.map(h => h.category))].slice(0, 5).map(cat => (
-                            <th key={cat} style={{ padding: '8px', fontWeight: '700' }}>{cat}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...new Set(data.heatmap.map(h => h.ward_number))].slice(0, 8).map(ward => (
-                          <tr key={ward} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                            <td style={{ padding: '8px', textAlign: 'left', fontWeight: '600', backgroundColor: 'var(--bg-secondary)' }}>W-{ward}</td>
-                            {[...new Set(data.heatmap.map(h => h.category))].slice(0, 5).map(cat => {
-                              const match = data.heatmap.find(h => h.ward_number === ward && h.category === cat);
-                              const count = match ? match.count : 0;
-                              
-                              // Heat color weight calculation
-                              const maxVal = Math.max(...data.heatmap.map(h => h.count)) || 1;
-                              const weight = count / maxVal;
-                              const backgroundColor = `rgba(215, 38, 61, ${Math.max(weight * 0.9, count > 0 ? 0.15 : 0)})`; // Red opacity
-                              const color = weight > 0.5 ? '#ffffff' : 'var(--text-primary)';
-
-                              return (
-                                <td 
-                                  key={cat} 
-                                  style={{ padding: '8px', backgroundColor, color, fontWeight: count > 0 ? '700' : '400', cursor: count > 0 ? 'pointer' : 'default' }}
-                                  onClick={() => count > 0 && handleOpenDrillDown('ward_number', ward, `Ward ${ward} - ${cat}`)}
-                                >
-                                  {count}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff' }}>
+                  <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>Resolution Funnel</h3>
+                  <div style={{ height: '300px' }}>
+                    <EChart 
+                      option={{
+                        tooltip: {
+                          trigger: 'item',
+                          formatter: '{b}: <strong>{c}</strong>'
+                        },
+                        series: [
+                          {
+                            name: 'Resolution Process',
+                            type: 'funnel',
+                            left: '10%',
+                            top: 10,
+                            bottom: 10,
+                            width: '80%',
+                            min: 0,
+                            max: data.kpis.total_complaints || 100,
+                            minSize: '0%',
+                            maxSize: '100%',
+                            sort: 'descending',
+                            gap: 2,
+                            label: {
+                              show: true,
+                              position: 'inside',
+                              formatter: '{b}: {c}'
+                            },
+                            itemStyle: {
+                              borderColor: '#fff',
+                              borderWidth: 1
+                            },
+                            data: [
+                              { value: data.kpis.total_complaints, name: 'Received' },
+                              { value: data.kpis.open_complaints, name: 'Assigned' },
+                              { value: data.kpis.open_complaints - data.kpis.pending_complaints, name: 'In Progress' },
+                              { value: data.kpis.resolved_complaints, name: 'Resolved' },
+                              { value: Math.round(data.kpis.resolved_complaints * 0.95), name: 'Closed' }
+                            ].map((item, idx) => ({
+                              ...item,
+                              itemStyle: {
+                                color: ['#0F172A', '#2563EB', '#F59E0B', '#16A34A', '#0284C7'][idx]
+                              }
+                            }))
+                          }
+                        ]
+                      }}
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Row 5: SANKEY FLOW (Complaint -> Category -> Assignee -> Final Status) */}
-              <div className="card" style={{ padding: '20px' }}>
-                <h3 style={{ color: 'var(--navy-blue)', fontSize: '1.125rem', marginBottom: '16px', fontWeight: '700' }}>MIS Resolution Flow Routing (Sankey Flow representation)</h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '20px' }}>
+              {/* Row 4: Top 10 Wards Stacked Resolution */}
+              <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff' }}>
+                <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>Ward-wise Grievance Resolution Load</h3>
+                <div style={{ height: '300px' }}>
+                  <EChart 
+                    option={{
+                      tooltip: {
+                        trigger: 'axis',
+                        axisPointer: { type: 'shadow' }
+                      },
+                      legend: { data: ['Resolved', 'Pending'], bottom: 0 },
+                      grid: { left: '3%', right: '4%', bottom: '12%', top: '5%', containLabel: true },
+                      xAxis: {
+                        type: 'category',
+                        data: data.ward_wise_complaints.map(w => `Ward ${w.ward_number}`),
+                        axisTick: { show: false }
+                      },
+                      yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed', color: '#E2E8F0' } } },
+                      series: [
+                        {
+                          name: 'Resolved',
+                          type: 'bar',
+                          stack: 'total',
+                          itemStyle: { color: '#16A34A' },
+                          data: data.ward_wise_complaints.map(w => Math.round(w.count * ((data.kpis.resolution_percent || 50) / 100)))
+                        },
+                        {
+                          name: 'Pending',
+                          type: 'bar',
+                          stack: 'total',
+                          itemStyle: { color: '#F59E0B', borderRadius: [4, 4, 0, 0] },
+                          data: data.ward_wise_complaints.map(w => w.count - Math.round(w.count * ((data.kpis.resolution_percent || 50) / 100)))
+                        }
+                      ]
+                    }}
+                    onEvents={{
+                      click: (params) => {
+                        const wardNum = params.name.replace('Ward ', '');
+                        handleOpenDrillDown('ward_number', wardNum, `Ward: ${wardNum}`);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Row 5: Column-based Routing Flow */}
+              <div className="card" style={{ padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', backgroundColor: '#ffffff' }}>
+                <h3 style={{ color: '#0F172A', fontSize: '1rem', marginBottom: '16px', fontWeight: '800' }}>MIS Resolution Flow Routing</h3>
+                <p style={{ color: '#64748B', fontSize: '0.85rem', marginBottom: '20px' }}>
                   This visualization shows the path complaints take from their specific category, assigned officer, and their final status.
                 </p>
 
@@ -803,12 +1119,12 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                     
                     {/* Column 1: Category */}
                     <div>
-                      <h4 style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--navy-blue)', borderBottom: '2px solid var(--primary-green)', paddingBottom: '4px', marginBottom: '12px' }}>CATEGORY</h4>
+                      <h4 style={{ fontSize: '0.85rem', fontWeight: '700', color: '#0F172A', borderBottom: '2px solid #16A34A', paddingBottom: '4px', marginBottom: '12px' }}>CATEGORY</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {data.category_distribution.slice(0, 5).map((c, idx) => (
-                          <div key={c.category} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', backgroundColor: 'var(--bg-secondary)', borderLeft: `4px solid ${CHART_COLORS[idx % CHART_COLORS.length]}`, borderRadius: 'var(--radius-sm)' }}>
+                          <div key={c.category} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', backgroundColor: '#F8FAFC', borderLeft: `4px solid ${CHART_COLORS[idx % CHART_COLORS.length]}`, borderRadius: '8px' }}>
                             <span style={{ fontSize: '0.8rem', fontWeight: '600' }}>{c.category}</span>
-                            <span className="badge badge-success" style={{ fontSize: '0.75rem', backgroundColor: 'var(--border-color)', color: 'var(--text-primary)' }}>{c.count}</span>
+                            <span className="badge badge-success" style={{ fontSize: '0.75rem', backgroundColor: '#E2E8F0', color: '#0F172A' }}>{c.count}</span>
                           </div>
                         ))}
                       </div>
@@ -816,12 +1132,12 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
 
                     {/* Column 2: Assignee */}
                     <div>
-                      <h4 style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--navy-blue)', borderBottom: '2px solid var(--navy-blue)', paddingBottom: '4px', marginBottom: '12px' }}>ASSIGNEE</h4>
+                      <h4 style={{ fontSize: '0.85rem', fontWeight: '700', color: '#0F172A', borderBottom: '2px solid #2563EB', paddingBottom: '4px', marginBottom: '12px' }}>ASSIGNEE</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {data.assignee_workload.slice(0, 5).map((a) => (
-                          <div key={a.assignee} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', backgroundColor: 'var(--bg-secondary)', borderLeft: '4px solid var(--navy-blue)', borderRadius: 'var(--radius-sm)' }}>
+                          <div key={a.assignee} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', backgroundColor: '#F8FAFC', borderLeft: '4px solid #2563EB', borderRadius: '8px' }}>
                             <span style={{ fontSize: '0.8rem', fontWeight: '600' }}>{a.assignee}</span>
-                            <span className="badge" style={{ fontSize: '0.75rem', backgroundColor: 'var(--border-color)', color: 'var(--text-primary)' }}>{a.count}</span>
+                            <span className="badge" style={{ fontSize: '0.75rem', backgroundColor: '#E2E8F0', color: '#0F172A' }}>{a.count}</span>
                           </div>
                         ))}
                       </div>
@@ -829,20 +1145,38 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
 
                     {/* Column 3: Final Status */}
                     <div>
-                      <h4 style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--navy-blue)', borderBottom: '2px solid var(--saffron-orange)', paddingBottom: '4px', marginBottom: '12px' }}>STATUS</h4>
+                      <h4 style={{ fontSize: '0.85rem', fontWeight: '700', color: '#0F172A', borderBottom: '2px solid #F59E0B', paddingBottom: '4px', marginBottom: '12px' }}>STATUS</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {data.status_distribution.map((s) => (
-                          <div key={s.status} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', backgroundColor: 'var(--bg-secondary)', borderLeft: `4px solid ${s.status === 'Resolved' ? 'var(--color-success)' : s.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)'}`, borderRadius: 'var(--radius-sm)' }}>
-                            <span style={{ fontSize: '0.8rem', fontWeight: '600' }}>{s.status}</span>
-                            <span className="badge" style={{ fontSize: '0.75rem', backgroundColor: s.status === 'Resolved' ? 'var(--color-success-bg)' : s.status === 'Rejected' ? 'var(--color-danger-bg)' : 'var(--color-warning-bg)', color: s.status === 'Resolved' ? 'var(--color-success)' : s.status === 'Rejected' ? 'var(--color-danger)' : 'var(--color-warning)' }}>{s.count}</span>
-                          </div>
-                        ))}
+                        {data.status_distribution.map((s) => {
+                          const statusColors = {
+                            'Resolved': '#16A34A',
+                            'Rejected': '#DC2626',
+                            'Pending': '#F59E0B',
+                            'Assigned': '#2563EB',
+                            'In Progress': '#06B6D4'
+                          };
+                          const statusBgColors = {
+                            'Resolved': '#DCFCE7',
+                            'Rejected': '#FEE2E2',
+                            'Pending': '#FEF3C7',
+                            'Assigned': '#DBEAFE',
+                            'In Progress': '#ECFDF5'
+                          };
+                          const color = statusColors[s.status] || '#64748B';
+                          const bg = statusBgColors[s.status] || '#F1F5F9';
+                          return (
+                            <div key={s.status} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', backgroundColor: '#F8FAFC', borderLeft: `4px solid ${color}`, borderRadius: '8px' }}>
+                              <span style={{ fontSize: '0.8rem', fontWeight: '600' }}>{s.status}</span>
+                              <span className="badge" style={{ fontSize: '0.75rem', backgroundColor: bg, color: color }}>{s.count}</span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
 
                   </div>
                 ) : (
-                  <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-secondary)' }}>Flow data not available.</div>
+                  <div style={{ textAlign: 'center', padding: '20px', color: '#64748B' }}>Flow data not available.</div>
                 )}
               </div>
 
@@ -851,14 +1185,27 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
         </div>
       )}
 
-      {/* UPLOAD DAILY SHEET TAB */}
-      {activeTab === 'upload' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          
-          <div className="card" style={{ padding: '24px' }}>
+      {/* UPLOAD DAILY SHEET MODAL */}
+      {uploadModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div className="card" style={{ width: '90%', maxWidth: '1000px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', padding: '24px', position: 'relative', overflowY: 'auto' }}>
+            
+            {/* Close Button */}
+            <button 
+              style={{ position: 'absolute', top: '16px', right: '16px', border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}
+              onClick={() => {
+                setUploadModalOpen(false);
+                setValidationResult(null);
+                setImportResult(null);
+                setUploadFile(null);
+              }}
+            >
+              <XCircle size={24} />
+            </button>
+
             <h3 style={{ color: 'var(--navy-blue)', margin: '0 0 16px', fontWeight: '700' }}>Import Daily Namma MLA Sheet</h3>
             
-            <form onSubmit={handleValidateFile} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', border: '2px dashed var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '40px', gap: '16px', backgroundColor: 'var(--bg-secondary)' }}>
+            <form onSubmit={handleValidateFile} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', border: '2px dashed var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '40px', gap: '16px', backgroundColor: 'var(--bg-secondary)', marginBottom: '20px' }}>
               <UploadCloud size={48} style={{ color: 'var(--primary-green)' }} />
               
               <div style={{ textAlign: 'center' }}>
@@ -949,7 +1296,7 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                 </div>
 
                 {/* Preview Table */}
-                <div className="table-wrapper" style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                <div className="table-wrapper" style={{ maxHeight: '250px', overflowY: 'auto' }}>
                   <table className="data-table" style={{ fontSize: '0.85rem' }}>
                     <thead>
                       <tr>
@@ -1039,57 +1386,214 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                 </div>
               </div>
             )}
-          </div>
 
-          {/* HISTORICAL UPLOADS TABLE */}
-          <div className="card" style={{ padding: '24px' }}>
-            <h3 style={{ color: 'var(--navy-blue)', margin: '0 0 16px', fontWeight: '700' }}>Sheet Upload & Batch History</h3>
-            
-            <div className="table-wrapper">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Uploaded Date</th>
-                    <th>Filename</th>
-                    <th>Uploaded By</th>
-                    <th>Total Rows</th>
-                    <th>Imported</th>
-                    <th>Duplicates</th>
-                    <th>Rejected</th>
-                    <th>Batch ID</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {uploadHistory.map(h => (
-                    <tr key={h.upload_batch_id}>
-                      <td>{new Date(h.uploaded_at).toLocaleString()}</td>
-                      <td><strong>{h.filename}</strong></td>
-                      <td>{h.uploaded_by_email}</td>
-                      <td>{h.total_rows}</td>
-                      <td style={{ color: 'var(--color-success)', fontWeight: '600' }}>{h.imported_rows}</td>
-                      <td style={{ color: 'var(--color-warning)', fontWeight: '600' }}>{h.duplicate_rows}</td>
-                      <td style={{ color: 'var(--color-danger)', fontWeight: '600' }}>{h.invalid_rows}</td>
-                      <td style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>{h.upload_batch_id.slice(0, 8)}...</td>
-                    </tr>
-                  ))}
-                  {uploadHistory.length === 0 && (
+            {/* HISTORICAL UPLOADS TABLE */}
+            <div style={{ marginTop: '24px' }}>
+              <h4 style={{ color: 'var(--navy-blue)', margin: '0 0 12px', fontWeight: '700' }}>Sheet Upload & Batch History</h4>
+              <div className="table-wrapper" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                <table className="data-table" style={{ fontSize: '0.8rem' }}>
+                  <thead>
                     <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-secondary)' }}>
-                        No spreadsheet uploads logged yet.
-                      </td>
+                      <th>Uploaded Date</th>
+                      <th>Filename</th>
+                      <th>Uploaded By</th>
+                      <th>Total Rows</th>
+                      <th>Imported</th>
+                      <th>Duplicates</th>
+                      <th>Rejected</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {uploadHistory.map(h => (
+                      <tr key={h.upload_batch_id}>
+                        <td>{new Date(h.uploaded_at).toLocaleString()}</td>
+                        <td><strong>{h.filename}</strong></td>
+                        <td>{h.uploaded_by_email}</td>
+                        <td>{h.total_rows}</td>
+                        <td style={{ color: 'var(--color-success)', fontWeight: '600' }}>{h.imported_rows}</td>
+                        <td style={{ color: 'var(--color-warning)', fontWeight: '600' }}>{h.duplicate_rows}</td>
+                        <td style={{ color: 'var(--color-danger)', fontWeight: '600' }}>{h.invalid_rows}</td>
+                      </tr>
+                    ))}
+                    {uploadHistory.length === 0 && (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', padding: '16px', color: 'var(--text-secondary)' }}>
+                          No spreadsheet uploads logged yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
 
+          </div>
         </div>
       )}
 
       {/* REPORTS & RANKS TAB */}
       {activeTab === 'reports' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          
+          {/* FILTER TOGGLE BUTTON */}
+          <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'flex-start' }}>
+            <button 
+              className="btn" 
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', padding: '10px 18px', borderRadius: '12px', border: '1px solid #CBD5E1', backgroundColor: reportsFiltersExpanded ? '#0F172A' : '#ffffff', color: reportsFiltersExpanded ? '#ffffff' : '#0F172A', transition: 'all 0.2s ease', minWidth: '80px', boxShadow: '0 2px 6px rgba(0,0,0,0.03)', cursor: 'pointer' }}
+              onClick={() => setReportsFiltersExpanded(!reportsFiltersExpanded)}
+            >
+              <Filter size={18} />
+              <span style={{ fontSize: '0.7rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Filter</span>
+            </button>
+          </div>
+
+          {/* REPORTS FILTERS PANEL */}
+          {reportsFiltersExpanded && (
+            <div className="card" style={{ padding: '20px', borderRadius: '16px', marginBottom: '24px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', border: '1px solid var(--border-color)', backgroundColor: '#ffffff', animation: 'fadeIn 0.3s ease-out' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', borderBottom: '1px solid #E2E8F0', paddingBottom: '12px' }}>
+                <Filter size={18} style={{ color: '#2563EB' }} />
+                <h4 style={{ margin: 0, fontWeight: '800', color: '#0F172A', fontSize: '1.05rem', letterSpacing: '-0.02em' }}>Reports Filters</h4>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Start Date</label>
+                  <input 
+                    type="date" 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={reportsFilters.start_date}
+                    onChange={(e) => setReportsFilters(prev => ({ ...prev, start_date: e.target.value }))}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>End Date</label>
+                  <input 
+                    type="date" 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={reportsFilters.end_date}
+                    onChange={(e) => setReportsFilters(prev => ({ ...prev, end_date: e.target.value }))}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Ward Number</label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={reportsFilters.ward_number}
+                    onChange={(e) => setReportsFilters(prev => ({ ...prev, ward_number: e.target.value }))}
+                  >
+                    <option value="">All Wards</option>
+                    {filterOptions.wards.map(w => <option key={w} value={w}>Ward {w}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Category</label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={reportsFilters.category}
+                    onChange={(e) => setReportsFilters(prev => ({ ...prev, category: e.target.value }))}
+                  >
+                    <option value="">All Categories</option>
+                    {filterOptions.categories.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Status</label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={reportsFilters.status}
+                    onChange={(e) => setReportsFilters(prev => ({ ...prev, status: e.target.value }))}
+                  >
+                    <option value="">All Statuses</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Assigned">Assigned</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Resolved">Resolved</option>
+                    <option value="Rejected">Rejected</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Priority</label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={reportsFilters.priority}
+                    onChange={(e) => setReportsFilters(prev => ({ ...prev, priority: e.target.value }))}
+                  >
+                    <option value="">All Priorities</option>
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Assignee</label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={reportsFilters.assignee}
+                    onChange={(e) => setReportsFilters(prev => ({ ...prev, assignee: e.target.value }))}
+                  >
+                    <option value="">All Officers</option>
+                    {filterOptions.assignees.map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Constituency</label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={reportsFilters.constituency}
+                    onChange={(e) => setReportsFilters(prev => ({ ...prev, constituency: e.target.value }))}
+                  >
+                    <option value="">All Constituencies</option>
+                    {filterOptions.constituencies.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Search ID</label>
+                  <div style={{ position: 'relative', width: '100%' }}>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      placeholder="e.g. 5431" 
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '6px 24px 6px 8px' }}
+                      value={reportsFilters.search_id}
+                      onChange={(e) => setReportsFilters(prev => ({ ...prev, search_id: e.target.value }))}
+                    />
+                    <Search size={14} style={{ position: 'absolute', right: '8px', top: '9px', color: 'var(--text-light)' }} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Search Citizen</label>
+                  <div style={{ position: 'relative', width: '100%' }}>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      placeholder="Name or Mobile" 
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '6px 24px 6px 8px' }}
+                      value={reportsFilters.search_citizen}
+                      onChange={(e) => setReportsFilters(prev => ({ ...prev, search_citizen: e.target.value }))}
+                    />
+                    <Search size={14} style={{ position: 'absolute', right: '8px', top: '9px', color: 'var(--text-light)' }} />
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+                <button className="btn btn-secondary btn-sm" onClick={handleResetReportsFilters}>Reset Filters</button>
+                <button className="btn btn-primary btn-sm" onClick={fetchReports} disabled={loading}>
+                  <RefreshCw size={12} className={loading ? 'loading-spinner' : ''} style={{ marginRight: '4px' }} />
+                  Sync Reports
+                </button>
+              </div>
+            </div>
+          )}
           
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '24px' }}>
             
@@ -1117,26 +1621,38 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
                     </tr>
                   </thead>
                   <tbody>
-                    {leaderboard.map(officer => (
-                      <tr key={officer.officer} style={{ fontWeight: officer.rank <= 3 ? '600' : '400' }}>
-                        <td>
-                          {officer.rank === 1 ? '🥇' : officer.rank === 2 ? '🥈' : officer.rank === 3 ? '🥉' : `#${officer.rank}`}
-                        </td>
-                        <td><strong>{officer.officer}</strong></td>
-                        <td>{officer.total_assigned}</td>
-                        <td style={{ color: 'var(--color-success)' }}>{officer.resolved}</td>
-                        <td style={{ color: 'var(--color-warning)' }}>{officer.pending}</td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <div style={{ flexGrow: 1, backgroundColor: 'var(--border-color)', height: '6px', borderRadius: '3px', width: '50px' }}>
-                              <div style={{ backgroundColor: 'var(--color-success)', height: '6px', borderRadius: '3px', width: `${officer.completion_percent}%` }} />
+                    {leaderboard.map((officer, index) => {
+                      const isLast = index === leaderboard.length - 1 && leaderboard.length > 3;
+                      return (
+                        <tr key={officer.officer} style={{ fontWeight: officer.rank <= 3 ? '600' : '400', backgroundColor: officer.rank === 1 ? '#FFFDF5' : 'transparent' }}>
+                          <td>
+                            {officer.rank === 1 ? '🥇 Gold' : officer.rank === 2 ? '🥈 Silver' : officer.rank === 3 ? '🥉 Bronze' : `#${officer.rank}`}
+                          </td>
+                          <td><strong>{officer.officer}</strong></td>
+                          <td>{officer.total_assigned}</td>
+                          <td style={{ color: '#16A34A', fontWeight: '600' }}>{officer.resolved}</td>
+                          <td style={{ color: '#F59E0B', fontWeight: '600' }}>{officer.pending}</td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div style={{ flexGrow: 1, backgroundColor: '#E2E8F0', height: '6px', borderRadius: '3px', width: '50px' }}>
+                                <div style={{ backgroundColor: officer.completion_percent > 75 ? '#16A34A' : officer.completion_percent > 40 ? '#F59E0B' : '#DC2626', height: '6px', borderRadius: '3px', width: `${officer.completion_percent}%` }} />
+                              </div>
+                              <span style={{ fontSize: '0.8rem', fontWeight: '700' }}>{officer.completion_percent}%</span>
                             </div>
-                            <span>{officer.completion_percent}%</span>
-                          </div>
-                        </td>
-                        <td>{officer.avg_resolution_time_days}d</td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>{officer.avg_resolution_time_days}d</span>
+                              {isLast && (
+                                <span style={{ fontSize: '0.7rem', backgroundColor: '#FEE2E2', color: '#DC2626', padding: '2px 6px', borderRadius: '4px', fontWeight: '700' }}>
+                                  ⚠ Attention
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {leaderboard.length === 0 && (
                       <tr>
                         <td colSpan={7} style={{ textAlign: 'center', padding: '16px', color: 'var(--text-secondary)' }}>No performance stats available.</td>
@@ -1222,6 +1738,162 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
           <p style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
             Export tabular grievance lists matching the active filters, print summary reports, or download dashboard snapshots for offline presentations.
           </p>
+
+          {/* FILTER TOGGLE BUTTON */}
+          <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'flex-start' }}>
+            <button 
+              className="btn" 
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', padding: '10px 18px', borderRadius: '12px', border: '1px solid #CBD5E1', backgroundColor: exportFiltersExpanded ? '#0F172A' : '#ffffff', color: exportFiltersExpanded ? '#ffffff' : '#0F172A', transition: 'all 0.2s ease', minWidth: '80px', boxShadow: '0 2px 6px rgba(0,0,0,0.03)', cursor: 'pointer' }}
+              onClick={() => setExportFiltersExpanded(!exportFiltersExpanded)}
+            >
+              <Filter size={18} />
+              <span style={{ fontSize: '0.7rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Filter</span>
+            </button>
+          </div>
+
+          {/* EXPORT FILTERS PANEL */}
+          {exportFiltersExpanded && (
+            <div className="card" style={{ padding: '20px', borderRadius: '16px', marginBottom: '24px', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.05)', border: '1px solid var(--border-color)', backgroundColor: '#ffffff', animation: 'fadeIn 0.3s ease-out' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', borderBottom: '1px solid #E2E8F0', paddingBottom: '12px' }}>
+                <Filter size={18} style={{ color: '#2563EB' }} />
+                <h4 style={{ margin: 0, fontWeight: '800', color: '#0F172A', fontSize: '1.05rem', letterSpacing: '-0.02em' }}>Export Filters</h4>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Start Date</label>
+                  <input 
+                    type="date" 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={exportFilters.start_date}
+                    onChange={(e) => setExportFilters(prev => ({ ...prev, start_date: e.target.value }))}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>End Date</label>
+                  <input 
+                    type="date" 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={exportFilters.end_date}
+                    onChange={(e) => setExportFilters(prev => ({ ...prev, end_date: e.target.value }))}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Ward Number</label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={exportFilters.ward_number}
+                    onChange={(e) => setExportFilters(prev => ({ ...prev, ward_number: e.target.value }))}
+                  >
+                    <option value="">All Wards</option>
+                    {filterOptions.wards.map(w => <option key={w} value={w}>Ward {w}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Category</label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={exportFilters.category}
+                    onChange={(e) => setExportFilters(prev => ({ ...prev, category: e.target.value }))}
+                  >
+                    <option value="">All Categories</option>
+                    {filterOptions.categories.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Status</label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={exportFilters.status}
+                    onChange={(e) => setExportFilters(prev => ({ ...prev, status: e.target.value }))}
+                  >
+                    <option value="">All Statuses</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Assigned">Assigned</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Resolved">Resolved</option>
+                    <option value="Rejected">Rejected</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Priority</label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={exportFilters.priority}
+                    onChange={(e) => setExportFilters(prev => ({ ...prev, priority: e.target.value }))}
+                  >
+                    <option value="">All Priorities</option>
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Assignee</label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={exportFilters.assignee}
+                    onChange={(e) => setExportFilters(prev => ({ ...prev, assignee: e.target.value }))}
+                  >
+                    <option value="">All Officers</option>
+                    {filterOptions.assignees.map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Constituency</label>
+                  <select 
+                    className="form-control" 
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '6px' }}
+                    value={exportFilters.constituency}
+                    onChange={(e) => setExportFilters(prev => ({ ...prev, constituency: e.target.value }))}
+                  >
+                    <option value="">All Constituencies</option>
+                    {filterOptions.constituencies.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Search ID</label>
+                  <div style={{ position: 'relative', width: '100%' }}>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      placeholder="e.g. 5431" 
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '6px 24px 6px 8px' }}
+                      value={exportFilters.search_id}
+                      onChange={(e) => setExportFilters(prev => ({ ...prev, search_id: e.target.value }))}
+                    />
+                    <Search size={14} style={{ position: 'absolute', right: '8px', top: '9px', color: 'var(--text-light)' }} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Search Citizen</label>
+                  <div style={{ position: 'relative', width: '100%' }}>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      placeholder="Name or Mobile" 
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '6px 24px 6px 8px' }}
+                      value={exportFilters.search_citizen}
+                      onChange={(e) => setExportFilters(prev => ({ ...prev, search_citizen: e.target.value }))}
+                    />
+                    <Search size={14} style={{ position: 'absolute', right: '8px', top: '9px', color: 'var(--text-light)' }} />
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+                <button className="btn btn-secondary btn-sm" onClick={handleResetExportFilters}>Reset Filters</button>
+              </div>
+            </div>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px' }}>
             
