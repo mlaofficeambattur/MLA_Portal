@@ -111,9 +111,7 @@ const EChart = ({ option, style, onEvents }) => {
   return <div ref={chartRef} style={{ width: '100%', height: '100%', ...style }} />;
 };
 
-export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotification }) {
-
-  export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotification, readOnly }) {
+export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotification, readOnly }) {
 
     const [activeTab, setActiveTab] = useState('dashboard'); // dashboard, upload, reports, export
     const [filtersExpanded, setFiltersExpanded] = useState(false);
@@ -543,182 +541,32 @@ export default function NammaMlaAnalytics({ adminToken, API_BASE, showNotificati
               Dashboard
             </button>
             {!readOnly && (
-          <button 
-<<<<<<< HEAD
-=======
-            className={`btn btn-sm ${activeTab === 'upload' ? 'btn-primary' : 'btn-secondary'}`} 
-            style={{ borderRadius: 'var(--radius-sm)', border: 'none' }}
-            onClick={() => setActiveTab('upload')}
-          >
-            Upload Daily Sheet
-          </button>
-          )}
-          <button 
->>>>>>> 34cbb6f9b95db3c34483431254739536009ea3af
-            className={`btn btn-sm ${activeTab === 'reports' ? 'btn-primary' : 'btn-secondary'}`} 
-            style={{ borderRadius: 'var(--radius-sm)', border: 'none' }}
-            onClick={() => setActiveTab('reports')}
-          >
-            Reports & Ranks
-          </button>
-          <button 
-            className={`btn btn-sm ${activeTab === 'export' ? 'btn-primary' : 'btn-secondary'}`} 
-            style={{ borderRadius: 'var(--radius-sm)', border: 'none' }}
-            onClick={() => setActiveTab('export')}
-          >
-            Export Panel
-          </button>
-        </div>
-        </div>
-
-<<<<<<< HEAD
-=======
-      {/* GLOBAL FILTERS PANEL */}
-      {activeTab !== 'upload' && (
-        <div className="card" style={{ marginBottom: '24px', padding: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
-            <Filter size={16} style={{ color: 'var(--primary-green)' }} />
-            <h4 style={{ margin: 0, fontWeight: '700', color: 'var(--navy-blue)' }}>Global Analytics Filters</h4>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Start Date</label>
-              <input
-                type="date"
-                className="form-control"
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.start_date}
-                disabled={readOnly}
-                onChange={(e) => setFilters(prev => ({ ...prev, start_date: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>End Date</label>
-              <input
-                type="date"
-                className="form-control"
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.end_date}
-                disabled={readOnly}
-                onChange={(e) => setFilters(prev => ({ ...prev, end_date: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Ward Number</label>
-              <select
-                className="form-control"
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.ward_number}
-                disabled={readOnly}
-                onChange={(e) => setFilters(prev => ({ ...prev, ward_number: e.target.value }))}
+              <button
+                className={`btn btn-sm ${activeTab === 'upload' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ borderRadius: 'var(--radius-sm)', border: 'none' }}
+                onClick={() => setActiveTab('upload')}
               >
-                <option value="">All Wards</option>
-                {filterOptions.wards.map(w => <option key={w} value={w}>Ward {w}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Category</label>
-              <select
-                className="form-control"
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.category}
-                disabled={readOnly}
-                onChange={(e) => setFilters(prev => ({ ...prev, category: e.target.value }))}
-              >
-                <option value="">All Categories</option>
-                {filterOptions.categories.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Status</label>
-              <select
-                className="form-control"
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.status}
-                disabled={readOnly}
-                onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value }))}
-              >
-                <option value="">All Statuses</option>
-                <option value="Pending">Pending</option>
-                <option value="Assigned">Assigned</option>
-                <option value="In Progress">In Progress</option>
-                <option value="Resolved">Resolved</option>
-                <option value="Rejected">Rejected</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Priority</label>
-              <select
-                className="form-control"
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.priority}
-                disabled={readOnly}
-                onChange={(e) => setFilters(prev => ({ ...prev, priority: e.target.value }))}
-              >
-                <option value="">All Priorities</option>
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
-                <option value="Urgent">Urgent</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Assignee</label>
-              <select
-                className="form-control"
-                style={{ fontSize: '0.85rem', padding: '6px' }}
-                value={filters.assignee}
-                disabled={readOnly}
-                onChange={(e) => setFilters(prev => ({ ...prev, assignee: e.target.value }))}
-              >
-                <option value="">All Officers</option>
-                {filterOptions.assignees.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Search ID</label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. 5431"
-                  style={{ fontSize: '0.85rem', padding: '6px 24px 6px 8px' }}
-                  value={filters.search_id}
-                  disabled={readOnly}
-                  onChange={(e) => setFilters(prev => ({ ...prev, search_id: e.target.value }))}
-                />
-                <Search size={14} style={{ position: 'absolute', right: '8px', top: '9px', color: 'var(--text-light)' }} />
-              </div>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Search Citizen</label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Name or Mobile"
-                  style={{ fontSize: '0.85rem', padding: '6px 24px 6px 8px' }}
-                  value={filters.search_citizen}
-                  disabled={readOnly}
-                  onChange={(e) => setFilters(prev => ({ ...prev, search_citizen: e.target.value }))}
-                />
-                <Search size={14} style={{ position: 'absolute', right: '8px', top: '9px', color: 'var(--text-light)' }} />
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
-            <button className="btn btn-secondary btn-sm" onClick={handleResetFilters}>Reset Filters</button>
-            <button className="btn btn-primary btn-sm" onClick={fetchAnalytics} disabled={loading}>
-              <RefreshCw size={12} className={loading ? 'spin-animation' : ''} style={{ marginRight: '4px' }} />
-              Sync Data
+                Upload Daily Sheet
+              </button>
+            )}
+            <button 
+              className={`btn btn-sm ${activeTab === 'reports' ? 'btn-primary' : 'btn-secondary'}`} 
+              style={{ borderRadius: 'var(--radius-sm)', border: 'none' }}
+              onClick={() => setActiveTab('reports')}
+            >
+              Reports & Ranks
             </button>
-          </div>
+            <button 
+              className={`btn btn-sm ${activeTab === 'export' ? 'btn-primary' : 'btn-secondary'}`} 
+              style={{ borderRadius: 'var(--radius-sm)', border: 'none' }}
+              onClick={() => setActiveTab('export')}
+            >
+              Export Panel
+            </button>
         </div>
-      )}
+        </div>
 
->>>>>>> 34cbb6f9b95db3c34483431254739536009ea3af
+
     {/* LOADING SPINNER */ }
     {
       loading && (
