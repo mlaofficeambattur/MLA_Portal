@@ -2,7 +2,22 @@ import sys
 import os
 import uuid
 import csv
-import requests
+import ssl
+import requests as _orig_requests
+from requests.adapters import HTTPAdapter
+
+class _SupabaseSSLAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+_http = _orig_requests.Session()
+_http.mount('https://', _SupabaseSSLAdapter())
+
+requests = _http
 
 from io import StringIO
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -62,7 +77,6 @@ class Token(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
-    role: Optional[str] = None  # 'SUPER_ADMIN', 'OFFICE_STAFF', 'WARD_MEMBER', 'COUNCILLOR'
 
 class AvailabilityCreate(BaseModel):
     available_date: date
@@ -152,7 +166,7 @@ async def get_current_admin(token: str = Depends(oauth2_scheme)):
         "apikey": supabase_storage.SUPABASE_SERVICE_ROLE_KEY
     }
     try:
-        res = requests.get(url, headers=headers)
+        res = requests.get(url, headers=headers, timeout=5)
         if res.status_code != 200:
             raise credentials_exception
         user_info = res.json()
@@ -168,7 +182,7 @@ async def get_current_admin(token: str = Depends(oauth2_scheme)):
 
     # Verify or auto-provision in database
     with db.get_db_cursor() as cursor:
-        cursor.execute("SELECT id, role FROM admins WHERE supabase_user_id = %s;", (supabase_user_id,))
+        cursor.execute("SELECT id, role, designation, ward, action FROM admins WHERE supabase_user_id = %s;", (supabase_user_id,))
         admin = cursor.fetchone()
         
         if admin is None:
@@ -177,10 +191,10 @@ async def get_current_admin(token: str = Depends(oauth2_scheme)):
                 detail="Access denied: You do not have portal privileges. Contact the MLA office to get registered."
             )
                 
-        return {"id": admin[0], "supabase_user_id": supabase_user_id, "role": admin[1], "email": email}
+        return {"id": admin[0], "supabase_user_id": supabase_user_id, "role": admin[1], "designation": admin[2], "ward": admin[3], "action": admin[4], "email": email}
 
 
-VALID_ROLES = {"SUPER_ADMIN", "OFFICE_STAFF", "ML", "WARD_MEMBER", "COUNCILLOR", "MLA_ASSISTANT", "READ_ONLY"}
+VALID_ROLES = {"SUPER_ADMIN", "OFFICE_STAFF", "ML", "WARD_MEMBER", "COUNSELOR", "MLA_ASSISTANT", "READ_ONLY"}
 
 def require_role(*allowed_roles):
     """Dependency factory that checks if the current user has one of the allowed roles."""
@@ -192,6 +206,16 @@ def require_role(*allowed_roles):
             )
         return current_user
     return role_checker
+
+def require_write(current_user: dict = Depends(get_current_admin)):
+    """Dependency that checks if the current user has write permission (action != 'Read').
+    SUPER_ADMIN role bypasses this check."""
+    if current_user["role"] != "SUPER_ADMIN" and current_user.get("action") == "Read":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Your account has read-only access."
+        )
+    return current_user
 
 # -----------------
 # API Endpoints
@@ -224,7 +248,7 @@ def admin_login(form_data: OAuth2PasswordRequestForm = Depends()):
         "password": form_data.password
     }
     try:
-        res = requests.post(url, headers=headers, json=payload)
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -242,24 +266,28 @@ def admin_login(form_data: OAuth2PasswordRequestForm = Depends()):
             raise HTTPException(status_code=401, detail="Invalid token from Supabase")
             
         with db.get_db_cursor() as cursor:
-            cursor.execute("SELECT id, role FROM admins WHERE supabase_user_id = %s;", (supabase_user_id,))
+            cursor.execute("SELECT id, role, action FROM admins WHERE supabase_user_id = %s;", (supabase_user_id,))
             admin = cursor.fetchone()
             if admin is None:
                 if email == "mlaofficeambattur@gmail.com":
                     cursor.execute(
-                        "INSERT INTO admins (supabase_user_id, role) VALUES (%s, %s) RETURNING id, role;",
-                        (supabase_user_id, "SUPER_ADMIN")
+                        "INSERT INTO admins (supabase_user_id, role, action) VALUES (%s, %s, %s) RETURNING id, role, action;",
+                        (supabase_user_id, "SUPER_ADMIN", "Read_Write")
                     )
+                    admin = cursor.fetchone()
                     print(f"Auto-provisioned SUPER_ADMIN for {email}")
                 else:
                     raise HTTPException(status_code=403, detail="Access denied: You do not have portal privileges. Contact the MLA office to get registered.")
                     
-        return {"access_token": access_token, "token_type": "bearer", "role": admin[1] if admin else "SUPER_ADMIN"}
+        return {"access_token": access_token, "token_type": "bearer", "role": admin[1] if admin else "SUPER_ADMIN", "action": admin[2] if admin else "Read_Write"}
     except HTTPException as he:
         raise he
+    except requests.exceptions.ConnectionError as e:
+        print(f"Login connection error: {e}")
+        raise HTTPException(status_code=503, detail="Authentication service is temporarily unreachable. Please check your internet connection and try again.")
     except Exception as e:
         print(f"Login proxy error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error connecting to Auth provider")
+        raise HTTPException(status_code=500, detail="Authentication service error. Please try again later.")
 
 # Alternative JSON body login endpoint for client convenience
 @app.post("/api/admin/login-json", response_model=Token)
@@ -275,7 +303,7 @@ def admin_login_json(req: LoginRequest):
         "password": req.password
     }
     try:
-        res = requests.post(url, headers=headers, json=payload)
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -290,35 +318,42 @@ def admin_login_json(req: LoginRequest):
         
         if not supabase_user_id or not email:
             raise HTTPException(status_code=401, detail="Invalid token from Supabase")
-            
-        # Determine role: use provided role, or auto-detect for known emails
-        role = req.role
-        if role and role not in VALID_ROLES:
-            raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(sorted(VALID_ROLES))}")
         
         with db.get_db_cursor() as cursor:
-            cursor.execute("SELECT id, role FROM admins WHERE supabase_user_id = %s;", (supabase_user_id,))
+            cursor.execute("SELECT id, role, action FROM admins WHERE supabase_user_id = %s;", (supabase_user_id,))
             admin = cursor.fetchone()
             if admin is None:
-                # Auto-provision: use provided role, or default for MLA office email
-                if role:
-                    assigned_role = role
-                elif email == "mlaofficeambattur@gmail.com":
-                    assigned_role = "SUPER_ADMIN"
+                if email == "mlaofficeambattur@gmail.com":
+                    cursor.execute(
+                        "INSERT INTO admins (supabase_user_id, role, action) VALUES (%s, %s, %s) RETURNING id, role, action;",
+                        (supabase_user_id, "SUPER_ADMIN", "Read_Write")
+                    )
+                    admin = cursor.fetchone()
+                    print(f"Auto-provisioned SUPER_ADMIN for {email}")
                 else:
                     raise HTTPException(status_code=403, detail="Access denied: You do not have portal privileges. Contact the MLA office to get registered.")
-                cursor.execute(
-                    "INSERT INTO admins (supabase_user_id, role) VALUES (%s, %s) RETURNING id, role;",
-                    (supabase_user_id, assigned_role)
-                )
-                admin = cursor.fetchone()
-                print(f"Auto-provisioned {assigned_role} for {email}")
-        return {"access_token": access_token, "token_type": "bearer", "role": admin[1]}
+        return {"access_token": access_token, "token_type": "bearer", "role": admin[1], "action": admin[2]}
     except HTTPException as he:
         raise he
+    except requests.exceptions.ConnectionError as e:
+        print(f"Login connection error: {e}")
+        raise HTTPException(status_code=503, detail="Authentication service is temporarily unreachable. Please check your internet connection and try again.")
     except Exception as e:
         print(f"Login proxy error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error connecting to Auth provider")
+        raise HTTPException(status_code=500, detail="Authentication service error. Please try again later.")
+
+@app.post("/api/admin/logout")
+def admin_logout(token: str = Depends(oauth2_scheme), current_admin: dict = Depends(get_current_admin)):
+    url = f"{supabase_storage.SUPABASE_URL}/auth/v1/logout"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "apikey": supabase_storage.SUPABASE_SERVICE_ROLE_KEY
+    }
+    try:
+        requests.post(url, headers=headers, timeout=5)
+    except Exception as e:
+        print(f"Logout proxy warning: {e}")
+    return {"message": "Logged out successfully"}
 
 class ForgotPasswordRequest(BaseModel):
     email: str
@@ -336,7 +371,7 @@ def forgot_password(req: ForgotPasswordRequest):
         "email": req.email
     }
     try:
-        res = requests.post(url, headers=headers, json=payload)
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code != 200:
             data = res.json()
             error_msg = data.get("error_description") or data.get("msg") or "Failed to request password recovery."
@@ -355,14 +390,17 @@ class ChangePasswordRequest(BaseModel):
 
 @app.get("/api/admin/me")
 def get_admin_profile(current_admin: dict = Depends(get_current_admin)):
-    """Retrieves current admin email and role."""
+    """Retrieves current admin email, role, designation, and ward."""
     return {
         "email": current_admin.get("email"),
         "role": current_admin.get("role"),
+        "designation": current_admin.get("designation"),
+        "ward": current_admin.get("ward"),
+        "action": current_admin.get("action"),
         "id": current_admin.get("id")
     }
 
-@app.post("/api/admin/change-password")
+@app.post("/api/admin/change-password", dependencies=[Depends(require_write)])
 def change_admin_password(
     req: ChangePasswordRequest,
     token: str = Depends(oauth2_scheme),
@@ -450,6 +488,194 @@ def reset_admin_password(
         raise HTTPException(status_code=500, detail=f"Failed to communicate with Auth provider: {str(e)}")
         
     return {"success": True, "message": "Password reset successfully!"}
+
+class CreateStaffRequest(BaseModel):
+    email: str
+    password: str
+    role: str
+    ward: Optional[str] = None
+    action: Optional[str] = 'Read'
+
+@app.post("/api/admin/create-staff", dependencies=[Depends(require_write)])
+def create_staff(
+    req: CreateStaffRequest,
+    current_admin: dict = Depends(require_role("SUPER_ADMIN"))
+):
+    import requests
+
+
+
+    url = f"{supabase_storage.SUPABASE_URL}/auth/v1/admin/users"
+    headers = {
+        "apikey": supabase_storage.SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {supabase_storage.SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {"email": req.email, "password": req.password, "email_confirm": True}
+
+    res = requests.post(url, headers=headers, json=payload, timeout=10)
+
+    if res.status_code == 422:
+        error_data = res.json()
+        if error_data.get("error_code") == "email_exists":
+            list_res = requests.get(
+                f"{supabase_storage.SUPABASE_URL}/auth/v1/admin/users?email={req.email}",
+                headers=headers
+            )
+            users_data = list_res.json().get("users", [])
+            if not users_data:
+                raise HTTPException(status_code=500, detail="User exists in Auth but could not retrieve ID.")
+            supabase_user_id = users_data[0]["id"]
+        else:
+            raise HTTPException(status_code=400, detail=error_data.get("msg", "Failed to create user in Auth"))
+    elif res.status_code != 200:
+        raise HTTPException(status_code=400, detail="Failed to create user in Auth provider")
+    else:
+        supabase_user_id = res.json().get("id")
+
+    with db.get_db_cursor() as cursor:
+        cursor.execute("SELECT id FROM admins WHERE supabase_user_id = %s;", (supabase_user_id,))
+        existing = cursor.fetchone()
+        if existing:
+            return {"success": True, "message": f"Staff with email {req.email} already exists in the portal."}
+
+        cursor.execute("SELECT id FROM admins WHERE role = %s;", (req.role,))
+        if cursor.fetchone():
+            return {"success": True, "message": f"Staff with role '{req.role}' already exists."}
+
+        auto_write_roles = {"COUNSELOR", "WARD_MEMBER", "SUPER_ADMIN"}
+        resolved_action = "Read_Write" if req.role.upper() in auto_write_roles else req.action
+        cursor.execute(
+            "INSERT INTO admins (supabase_user_id, role, ward, action) VALUES (%s, %s, %s, %s) RETURNING id;",
+            (supabase_user_id, req.role, req.ward, resolved_action)
+        )
+        admin_id = cursor.fetchone()[0]
+
+    return {
+        "success": True,
+        "message": f"Staff created successfully with role {req.role}.",
+        "admin_id": admin_id,
+        "email": req.email
+    }
+
+@app.get("/api/admin/staff-list")
+def list_staff(current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
+    with db.get_db_cursor() as cursor:
+        cursor.execute("SELECT id, supabase_user_id, role, ward, action, created_at FROM admins ORDER BY created_at DESC;")
+        staff = cursor.fetchall()
+    return [
+        {
+            "id": s[0],
+            "supabase_user_id": str(s[1]),
+            "role": s[2],
+            "ward": s[3],
+            "action": s[4],
+            "created_at": s[5].isoformat() if s[5] else None
+        }
+        for s in staff
+    ]
+
+class UpdateStaffRequest(BaseModel):
+    role: Optional[str] = None
+    ward: Optional[str] = None
+    action: Optional[str] = None
+
+@app.patch("/api/admin/staff/{staff_id}")
+def update_staff(staff_id: int, req: UpdateStaffRequest, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
+    updates = {}
+    if req.role is not None:
+        updates["role"] = req.role
+    updates["ward"] = req.ward
+    if req.action is not None:
+        updates["action"] = req.action
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    set_clause = ", ".join(f"{k} = %s" for k in updates)
+    values = list(updates.values()) + [staff_id]
+
+    with db.get_db_cursor() as cursor:
+        cursor.execute(f"UPDATE admins SET {set_clause} WHERE id = %s RETURNING id, role, ward;", values)
+        updated = cursor.fetchone()
+        if not updated:
+            raise HTTPException(status_code=404, detail="Staff not found")
+
+    return {"id": updated[0], "role": updated[1], "ward": updated[2]}
+
+@app.delete("/api/admin/staff/{staff_id}", dependencies=[Depends(require_write)])
+def delete_staff(staff_id: int, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
+    with db.get_db_cursor() as cursor:
+        cursor.execute("SELECT supabase_user_id FROM admins WHERE id = %s;", (staff_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Staff not found")
+        supabase_user_id = row[0]
+
+        if supabase_user_id:
+            url = f"{supabase_storage.SUPABASE_URL}/auth/v1/admin/users/{supabase_user_id}"
+            headers = {
+                "Authorization": f"Bearer {supabase_storage.SUPABASE_SERVICE_ROLE_KEY}",
+                "apikey": supabase_storage.SUPABASE_SERVICE_ROLE_KEY,
+            }
+            try:
+                res = requests.delete(url, headers=headers, timeout=5)
+                if res.status_code not in (200, 204):
+                    print(f"Warning: Failed to delete Supabase Auth user {supabase_user_id}: {res.status_code} {res.text}")
+            except Exception as e:
+                print(f"Warning: Error deleting Supabase Auth user: {e}")
+
+        cursor.execute("DELETE FROM admins WHERE id = %s RETURNING id;", (staff_id,))
+        cursor.fetchone()
+    return {"success": True, "message": "Staff and associated login account deleted successfully."}
+
+class ResetStaffPasswordRequest(BaseModel):
+    new_password: str
+
+@app.post("/api/admin/staff/{staff_id}/reset-password", dependencies=[Depends(require_write)])
+def reset_staff_password(
+    staff_id: int,
+    req: ResetStaffPasswordRequest,
+    current_admin: dict = Depends(require_role("SUPER_ADMIN"))
+):
+    """Allows SUPER_ADMIN to reset any staff member's password directly (for forgot password scenarios)."""
+    import requests
+
+    # 1. Look up the staff member's supabase_user_id
+    with db.get_db_cursor() as cursor:
+        cursor.execute("SELECT supabase_user_id FROM admins WHERE id = %s;", (staff_id,))
+        staff = cursor.fetchone()
+        if not staff:
+            raise HTTPException(status_code=404, detail="Staff not found")
+        supabase_user_id = staff[0]
+
+    if not supabase_user_id:
+        raise HTTPException(status_code=400, detail="Staff member has no Auth user linked. Contact support.")
+
+    # 2. Update password via Supabase Admin API
+    url = f"{supabase_storage.SUPABASE_URL}/auth/v1/admin/users/{supabase_user_id}"
+    headers = {
+        "apikey": supabase_storage.SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {supabase_storage.SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {"password": req.new_password}
+
+    try:
+        res = requests.put(url, headers=headers, json=payload, timeout=10)
+        if res.status_code != 200:
+            detail_msg = "Failed to update password in Auth provider"
+            try:
+                detail_msg = res.json().get("msg") or res.json().get("error_description") or detail_msg
+            except Exception:
+                pass
+            raise HTTPException(status_code=400, detail=detail_msg)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to communicate with Auth provider: {str(e)}")
+
+    return {"success": True, "message": "Password reset successfully for staff member."}
 
 # --- PUBLIC SLOTS APIS ---
 
@@ -602,7 +828,7 @@ def track_appointment(token_number: str, phone: str):
 
 # --- ADMIN AVAILABILITY MANAGEMENT ---
 
-@app.post("/api/admin/availability")
+@app.post("/api/admin/availability", dependencies=[Depends(require_write)])
 def create_availability(req: AvailabilityCreate, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Creates a new availability range and automatically generates slots."""
     if req.available_date < date.today():
@@ -653,7 +879,7 @@ def create_availability(req: AvailabilityCreate, current_admin: dict = Depends(r
             
     return {"success": True, "message": f"Availability created. Generated {len(slots_to_insert)} slots.", "availability_id": availability_id}
 
-@app.put("/api/admin/availability/{availability_id}")
+@app.put("/api/admin/availability/{availability_id}", dependencies=[Depends(require_write)])
 def update_availability(availability_id: int, req: AvailabilityCreate, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Updates an availability range and regenerates slots. Blocks if slots are already booked."""
     try:
@@ -717,7 +943,7 @@ def update_availability(availability_id: int, req: AvailabilityCreate, current_a
             
     return {"success": True, "message": f"Availability updated. Regenerated {len(slots_to_insert)} slots."}
 
-@app.delete("/api/admin/availability/{availability_id}")
+@app.delete("/api/admin/availability/{availability_id}", dependencies=[Depends(require_write)])
 def delete_availability(availability_id: int, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Deletes an availability range and its slots. Blocks if slots are already booked."""
     with db.get_db_cursor() as cursor:
@@ -819,7 +1045,7 @@ def get_all_appointments(current_admin: dict = Depends(get_current_admin)):
             })
     return {"appointments": appointments}
 
-@app.put("/api/admin/appointments/{appointment_id}")
+@app.put("/api/admin/appointments/{appointment_id}", dependencies=[Depends(require_write)])
 def update_appointment_status(appointment_id: int, req: AppointmentStatusUpdate, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Updates appointment status (CONFIRMED, CANCELLED, COMPLETED, NO_SHOW, RESCHEDULED)."""
     with db.get_db_cursor() as cursor:
@@ -1310,7 +1536,7 @@ def get_all_grievances(current_admin: dict = Depends(get_current_admin)):
     return {"grievances": grievances}
 
 # --- ADMIN GRIEVANCE UPDATE ---
-@app.put("/api/admin/grievances/{grievance_id}")
+@app.put("/api/admin/grievances/{grievance_id}", dependencies=[Depends(require_write)])
 def update_grievance_status(grievance_id: str, req: GrievanceStatusUpdate, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Updates grievance status and registers history audit trail."""
     try:
@@ -1501,7 +1727,7 @@ def get_admin_news(current_admin: dict = Depends(get_current_admin)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/admin/news")
+@app.post("/api/admin/news", dependencies=[Depends(require_write)])
 def create_news(req: NewsCreate, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Create a new news item."""
     try:
@@ -1517,7 +1743,7 @@ def create_news(req: NewsCreate, current_admin: dict = Depends(require_role("SUP
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.put("/api/admin/news/{news_id}")
+@app.put("/api/admin/news/{news_id}", dependencies=[Depends(require_write)])
 def update_news(news_id: int, req: NewsUpdate, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Update an existing news item."""
     try:
@@ -1538,7 +1764,7 @@ def update_news(news_id: int, req: NewsUpdate, current_admin: dict = Depends(req
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.delete("/api/admin/news/{news_id}")
+@app.delete("/api/admin/news/{news_id}", dependencies=[Depends(require_write)])
 def delete_news(news_id: int, current_admin: dict = Depends(require_role("SUPER_ADMIN"))):
     """Delete a news item."""
     try:
@@ -1552,7 +1778,7 @@ def delete_news(news_id: int, current_admin: dict = Depends(require_role("SUPER_
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/api/admin/grievances/import")
+@app.post("/api/admin/grievances/import", dependencies=[Depends(require_write)])
 def import_grievances_csv(
     file: UploadFile = File(...),
     current_admin: dict = Depends(require_role("SUPER_ADMIN"))
@@ -1718,7 +1944,7 @@ def import_grievances_csv(
 # NAMMA MLA COMPLAINT ANALYTICS ENDPOINTS
 # ---------------------------------------------
 
-@app.post("/api/admin/namma-mla/validate")
+@app.post("/api/admin/namma-mla/validate", dependencies=[Depends(require_write)])
 async def validate_namma_mla_sheet(
     file: UploadFile = File(...),
     current_admin: dict = Depends(require_role("SUPER_ADMIN"))
@@ -1737,7 +1963,7 @@ async def validate_namma_mla_sheet(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/api/admin/namma-mla/import")
+@app.post("/api/admin/namma-mla/import", dependencies=[Depends(require_write)])
 def import_namma_mla_data(
     payload: NammaMlaImportRequest,
     current_admin: dict = Depends(require_role("SUPER_ADMIN"))
@@ -2084,12 +2310,12 @@ def get_ward_member_grievances(current_user: dict = Depends(get_current_admin)):
 
 
 # ---------------------------------------------
-# COUNCILLOR ENDPOINTS (role = COUNCILLOR)
+# COUNSELOR ENDPOINTS (role = COUNSELOR)
 # ---------------------------------------------
 
-@app.get("/api/councillor/dashboard", dependencies=[Depends(require_role("COUNCILLOR", "SUPER_ADMIN", "OFFICE_STAFF"))])
-def get_councillor_dashboard(current_user: dict = Depends(get_current_admin)):
-    """Returns a constituency-level overview for councillors."""
+@app.get("/api/counselor/dashboard", dependencies=[Depends(require_role("COUNSELOR", "SUPER_ADMIN", "OFFICE_STAFF"))])
+def get_counselor_dashboard(current_user: dict = Depends(get_current_admin)):
+    """Returns a constituency-level overview for counselors."""
     with db.get_db_cursor() as cursor:
         # Appointments summary
         cursor.execute("SELECT COUNT(*) FROM appointments;")
@@ -2171,9 +2397,9 @@ def get_councillor_dashboard(current_user: dict = Depends(get_current_admin)):
     }
 
 
-@app.get("/api/councillor/appointments", dependencies=[Depends(require_role("COUNCILLOR", "SUPER_ADMIN", "OFFICE_STAFF"))])
-def get_councillor_appointments(current_user: dict = Depends(get_current_admin)):
-    """Lists all appointments for councillor view."""
+@app.get("/api/counselor/appointments", dependencies=[Depends(require_role("COUNSELOR", "SUPER_ADMIN", "OFFICE_STAFF"))])
+def get_counselor_appointments(current_user: dict = Depends(get_current_admin)):
+    """Lists all appointments for counselor view."""
     with db.get_db_cursor() as cursor:
         cursor.execute("""
             SELECT a.id, a.token_number, a.purpose, a.status, a.created_at,
@@ -2205,9 +2431,9 @@ def get_councillor_appointments(current_user: dict = Depends(get_current_admin))
     return {"appointments": appointments}
 
 
-@app.get("/api/councillor/grievances", dependencies=[Depends(require_role("COUNCILLOR", "SUPER_ADMIN", "OFFICE_STAFF"))])
-def get_councillor_grievances(current_user: dict = Depends(get_current_admin)):
-    """Lists all grievances for councillor view."""
+@app.get("/api/counselor/grievances", dependencies=[Depends(require_role("COUNSELOR", "SUPER_ADMIN", "OFFICE_STAFF"))])
+def get_counselor_grievances(current_user: dict = Depends(get_current_admin)):
+    """Lists all grievances for counselor view."""
     with db.get_db_cursor() as cursor:
         cursor.execute("""
             SELECT g.id, g.category, g.description, g.status, g.ward_number,

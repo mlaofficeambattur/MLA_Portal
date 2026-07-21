@@ -26,7 +26,11 @@ import {
   Globe,
   CirclePlay,
   ExternalLink,
-  Megaphone
+  Megaphone,
+  Shield,
+  Eye,
+  EyeOff,
+  Pencil
 } from 'lucide-react';
 import NammaMlaAnalytics from './NammaMlaAnalytics';
 
@@ -710,8 +714,9 @@ export default function App() {
   // Admin Authentication & Dashboard state
   const [adminToken, setAdminToken] = useState(localStorage.getItem('admin_token') || '');
   const [userRole, setUserRole] = useState(localStorage.getItem('user_role') || '');
+  const [userAction, setUserAction] = useState(localStorage.getItem('user_action') || (localStorage.getItem('admin_token') ? 'Read_Write' : ''));
   const [adminView, setAdminView] = useState('appointments'); // appointments, availability, stats, grievances
-  const [loginData, setLoginData] = useState({ username: '', password: '', role: 'SUPER_ADMIN' });
+  const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
@@ -768,6 +773,15 @@ export default function App() {
   const [adminProfile, setAdminProfile] = useState(null);
   const [passwordUpdateData, setPasswordUpdateData] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [staffForm, setStaffForm] = useState({ email: '', role: '', password: '', confirmPassword: '', ward: '', action: 'Read' });
+  const [showStaffPassword, setShowStaffPassword] = useState(false);
+  const [staffLoading, setStaffLoading] = useState(false);
+  const [staffList, setStaffList] = useState([]);
+  const [staffListLoading, setStaffListLoading] = useState(false);
+  const [selectedStaff, setSelectedStaff] = useState(null);
+  const [editingStaff, setEditingStaff] = useState(null);
+  const [resetPasswordStaff, setResetPasswordStaff] = useState(null);
+  const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
 
   const showNotification = (message, type = 'success') => {
     setNotification({ message, type });
@@ -820,6 +834,178 @@ export default function App() {
       });
   };
 
+  const handleCreateStaff = (e) => {
+    e.preventDefault();
+    if (staffForm.password !== staffForm.confirmPassword) {
+      showNotification("Passwords do not match.", "error");
+      return;
+    }
+    if (staffForm.password.length < 6) {
+      showNotification("Password must be at least 6 characters.", "error");
+      return;
+    }
+    setStaffLoading(true);
+    fetch(API_BASE + '/admin/create-staff', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({
+        email: staffForm.email,
+        password: staffForm.password,
+        role: staffForm.role.trim(),
+        ward: staffForm.ward.trim() || null,
+        action: staffForm.action
+      })
+    })
+      .then(async res => {
+        const data = await res.json();
+        console.log('Create staff response:', res.status, data);
+        if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+        return data;
+      })
+      .then(data => {
+        if (data.message && data.message.toLowerCase().includes('already exists')) {
+          if (data.message.toLowerCase().includes('role')) {
+            showNotification('Role already exists, please use a different role.', "error");
+          } else {
+            showNotification('Email already exists, please use a different email address.', "error");
+          }
+          return;
+        }
+        showNotification(data.message || "Staff created", "success");
+        setStaffForm({ email: '', role: '', password: '', confirmPassword: '', ward: '', action: 'Read' });
+        fetchStaffList();
+        setAdminView('staff');
+      })
+      .catch(err => {
+        console.error('Create staff error:', err);
+        showNotification(err.message, "error");
+      })
+      .finally(() => setStaffLoading(false));
+  };
+
+  const fetchStaffList = () => {
+    setStaffListLoading(true);
+    console.log('Fetching staff list...');
+    fetch(API_BASE + '/admin/staff-list', {
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    })
+      .then(async res => {
+        const data = await res.json();
+        console.log('Staff list response:', res.status, data);
+        if (!res.ok) throw new Error(data.detail || 'Failed to fetch staff list.');
+        return data;
+      })
+      .then(data => {
+        console.log('Setting staffList to:', data);
+        setStaffList(data);
+      })
+      .catch(err => {
+        console.error('Staff list error:', err);
+        showNotification(err.message, "error");
+      })
+      .finally(() => setStaffListLoading(false));
+  };
+
+  const handleDeleteStaff = (id) => {
+    if (!window.confirm("Are you sure you want to delete this staff member? This will also remove their login account (email and password).")) return;
+    fetch(API_BASE + '/admin/staff/' + id, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to delete staff.');
+        return data;
+      })
+      .then(data => {
+        showNotification(data.message, "success");
+        setSelectedStaff(null);
+        fetchStaffList();
+      })
+      .catch(err => showNotification(err.message, "error"));
+  };
+
+  const handleUpdateStaff = (e) => {
+    e.preventDefault();
+    console.log('Updating staff:', editingStaff);
+    try {
+      const url = API_BASE + '/admin/staff/' + editingStaff.id;
+      console.log('PATCH', url);
+      fetch(url, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`
+        },
+        body: JSON.stringify({
+          role: (editingStaff.role || '').trim(),
+          ward: (editingStaff.ward || '').trim() || null,
+          action: editingStaff.action || 'Read'
+        })
+      })
+      .then(async res => {
+        console.log('PATCH response:', res.status, res);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to update staff.');
+        return data;
+      })
+      .then(data => {
+        showNotification("Staff updated successfully", "success");
+        setEditingStaff(null);
+        setSelectedStaff(null);
+        fetchStaffList();
+      })
+      .catch(err => {
+        console.error('PATCH error:', err);
+        showNotification(err.message, "error");
+      });
+    } catch (err) {
+      console.error('handleUpdateStaff synchronous error:', err);
+      showNotification('Error: ' + err.message, "error");
+    }
+  };
+
+  const handleResetStaffPassword = (e) => {
+    e.preventDefault();
+    if (resetPasswordData.newPassword !== resetPasswordData.confirmPassword) {
+      showNotification("New passwords do not match.", "error");
+      return;
+    }
+    if (resetPasswordData.newPassword.length < 6) {
+      showNotification("Password must be at least 6 characters.", "error");
+      return;
+    }
+    console.log('Resetting password for staff:', resetPasswordStaff);
+    if (!resetPasswordStaff || !resetPasswordStaff.id) {
+      showNotification("No staff member selected for password reset.", "error");
+      return;
+    }
+    setResetPasswordLoading(true);
+    fetch(API_BASE + '/admin/staff/' + resetPasswordStaff.id + '/reset-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ new_password: resetPasswordData.newPassword })
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to reset password.');
+        return data;
+      })
+      .then(data => {
+        showNotification(data.message, "success");
+        setResetPasswordStaff(null);
+        setResetPasswordData({ newPassword: '', confirmPassword: '' });
+        fetchStaffList();
+      })
+      .catch(err => showNotification(err.message, "error"))
+      .finally(() => setResetPasswordLoading(false));
+  };
 
   const toggleAppointmentExpanded = (id) => {
     setExpandedAppointments(prev => ({ ...prev, [id]: !prev[id] }));
@@ -1156,6 +1342,7 @@ export default function App() {
               category: item.categories && item.categories[0] ? item.categories[0] : 'Government',
               link: item.link
             }));
+            news.sort((a, b) => new Date(b.date) - new Date(a.date));
             setFetchedNews(news);
           }
         })
@@ -1182,7 +1369,13 @@ export default function App() {
         if (res.status === 401) handleAdminLogout();
         return res.json();
       })
-      .then(data => setAdminProfile(data))
+      .then(data => {
+        setAdminProfile(data);
+        if (data.action) {
+          setUserAction(data.action);
+          localStorage.setItem('user_action', data.action);
+        }
+      })
       .catch(err => console.error("Error fetching admin profile:", err));
 
     // Fetch consolidated dashboard statistics
@@ -1525,8 +1718,6 @@ export default function App() {
   const handleAdminLogin = (e) => {
     e.preventDefault();
     setErrorMsg('');
-    
-    const role = loginData.role || 'SUPER_ADMIN';
 
     withLoading(
       fetch(API_BASE + '/admin/login-json', {
@@ -1534,8 +1725,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: loginData.username,
-          password: loginData.password,
-          role: role
+          password: loginData.password
         })
       })
         .then(async res => {
@@ -1546,14 +1736,17 @@ export default function App() {
           return data;
         })
         .then(data => {
-          const userRole = data.role || role;
+          const userRole = data.role || 'SUPER_ADMIN';
+          const userAction = data.action || 'Read_Write';
           localStorage.setItem('admin_token', data.access_token);
           localStorage.setItem('user_role', userRole);
+          localStorage.setItem('user_action', userAction);
           setAdminToken(data.access_token);
           setUserRole(userRole);
+          setUserAction(userAction);
           
           setCurrentView('admin-dashboard');
-          setLoginData({ username: '', password: '', role: 'SUPER_ADMIN' });
+          setLoginData({ username: '', password: '' });
         })
         .catch(err => {
           setErrorMsg(err.message);
@@ -1643,9 +1836,18 @@ export default function App() {
   const handleAdminLogout = () => {
     localStorage.removeItem('admin_token');
     localStorage.removeItem('user_role');
+    localStorage.removeItem('user_action');
     setAdminToken('');
     setUserRole('');
+    setUserAction('');
     setCurrentView('home');
+    fetch('http://localhost:8000/api/admin/logout', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      }
+    }).catch(() => {});
   };
 
   const handleCreateAvailability = (e) => {
@@ -1805,6 +2007,12 @@ export default function App() {
       document.removeEventListener('click', handleOutsideClick);
     };
   }, []);
+
+  useEffect(() => {
+    if ((adminView === 'settings' || adminView === 'staff') && userRole === 'SUPER_ADMIN') {
+      fetchStaffList();
+    }
+  }, [adminView]);
 
   return (
     <div className="app-container">
@@ -2081,7 +2289,7 @@ export default function App() {
           </div>
 
           <div className="navbar-right-controls" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            {adminToken && currentView !== 'home' && (
+            {adminToken && (
               <button 
                 className="nav-link-btn navbar-admin-btn" 
                 onClick={() => {
@@ -3509,19 +3717,6 @@ export default function App() {
                 {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
 
                 <div className="form-group">
-                  <label className="form-label">Login As</label>
-                  <select 
-                    className="form-select"
-                    value={loginData.role}
-                    onChange={e => setLoginData({...loginData, role: e.target.value})}
-                  >
-                    <option value="SUPER_ADMIN">Admin</option>
-                    <option value="WARD_MEMBER">Ward Member</option>
-                    <option value="COUNCILLOR">Councillor</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
                   <label className="form-label">Email Address</label>
                   <input 
                     type="email" 
@@ -3665,6 +3860,7 @@ export default function App() {
                       {adminView === 'stats' && 'Analytics & Reports'}
                       {adminView === 'namma-mla' && 'Namma MLA Analytics'}
                       {adminView === 'sms' && 'SMS Logs'}
+                      {adminView === 'staff' && 'Staff'}
                       {adminView === 'settings' && 'Settings'}
                     </span>
                     <ChevronDown size={16} className="chevron-icon" />
@@ -3732,6 +3928,16 @@ export default function App() {
                     </button>
                     <button 
                       type="button"
+                      className={`control-panel-dropdown-item ${adminView === 'staff' ? 'active' : ''}`}
+                      onClick={() => {
+                        setAdminView('staff');
+                        setAdminMenuOpen(false);
+                      }}
+                    >
+                      <Shield size={16} /> Staff
+                    </button>
+                    <button 
+                      type="button"
                       className={`control-panel-dropdown-item ${adminView === 'settings' ? 'active' : ''}`}
                       onClick={() => {
                         setAdminView('settings');
@@ -3789,6 +3995,13 @@ export default function App() {
                 >
                   <Mail size={18} /> SMS Logs
                 </button>
+                <button 
+                  className={`admin-sidebar-link btn ${adminView === 'staff' ? 'active' : 'btn-secondary'}`}
+                  style={{border: 'none', width: '100%', justifyContent: 'flex-start'}}
+                  onClick={() => setAdminView('staff')}
+                >
+                  <Shield size={18} /> Staff
+                </button>
 
                 <div style={{marginTop: '40px', paddingTop: '20px', borderTop: '1px solid var(--border-color)'}}>
                   <button 
@@ -3812,7 +4025,7 @@ export default function App() {
                   adminToken={adminToken} 
                   API_BASE={API_BASE} 
                   showNotification={showNotification} 
-                  readOnly={userRole !== 'SUPER_ADMIN'}
+                  readOnly={userRole !== 'SUPER_ADMIN' || userAction === 'Read'}
                 />
               )}
 
@@ -4394,7 +4607,243 @@ export default function App() {
                     </button>
                   </form>
                   )}
+
+                  {/* Create Staff - Admin only */}
+                  {userRole === 'SUPER_ADMIN' && (
+                  <div className="card">
+                    <h3 style={{color: 'var(--navy-blue)', fontSize: '1.1rem', marginBottom: '20px'}}>Create Staff</h3>
+                    <form onSubmit={handleCreateStaff} style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
+                      <div className="form-group">
+                        <label className="form-label">Email ID</label>
+                        <input type="email" required className="form-input" placeholder="staff@example.com"
+                          value={staffForm.email}
+                          onChange={e => setStaffForm({...staffForm, email: e.target.value})} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Role</label>
+                        <input type="text" className="form-input" placeholder="e.g. OFFICE_STAFF, COUNSELOR"
+                          value={staffForm.role}
+                          onChange={e => {
+                            const newRole = e.target.value;
+                            const autoWriteRoles = ['WARD_MEMBER', 'COUNSELOR', 'SUPER_ADMIN'];
+                            const newAction = autoWriteRoles.includes(newRole.toUpperCase()) ? 'Read_Write' : staffForm.action;
+                            setStaffForm({...staffForm, role: newRole, action: newAction});
+                          }} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Access</label>
+                        <select className="form-input" value={staffForm.action}
+                          onChange={e => setStaffForm({...staffForm, action: e.target.value})}>
+                          <option value="Read">Read</option>
+                          <option value="Write">Write</option>
+                          <option value="Read_Write">Both Read/Write</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Ward (optional)</label>
+                        <input type="text" className="form-input" placeholder="e.g. Ward 1"
+                          value={staffForm.ward}
+                          onChange={e => setStaffForm({...staffForm, ward: e.target.value})} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Password</label>
+                        <div style={{ position: 'relative' }}>
+                          <input type={showStaffPassword ? 'text' : 'password'} required className="form-input" placeholder="Min 6 characters"
+                            value={staffForm.password}
+                            onChange={e => setStaffForm({...staffForm, password: e.target.value})}
+                            style={{ width: '100%' }} />
+                          <span onClick={() => setShowStaffPassword(!showStaffPassword)}
+                            style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: '#888' }}>
+                            {showStaffPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Confirm Password</label>
+                        <div style={{ position: 'relative' }}>
+                          <input type={showStaffPassword ? 'text' : 'password'} required className="form-input" placeholder="Re-enter password"
+                            value={staffForm.confirmPassword}
+                            onChange={e => setStaffForm({...staffForm, confirmPassword: e.target.value})}
+                            style={{ width: '100%' }} />
+                          <span onClick={() => setShowStaffPassword(!showStaffPassword)}
+                            style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: '#888' }}>
+                            {showStaffPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                          </span>
+                        </div>
+                      </div>
+                      <button type="submit" className="nav-link-btn" style={{width: '100%', padding: '12px'}} disabled={staffLoading}>
+                        {staffLoading ? 'Creating...' : 'Create Staff'}
+                      </button>
+                    </form>
+                  </div>
+                  )}
+
                 </div>
+              </div>
+            )}
+
+            {/* TAB: STAFF */}
+            {adminView === 'staff' && (
+              <div>
+                <h2 style={{color: 'var(--navy-blue)', marginBottom: '24px', fontWeight: '800'}}>Staff List</h2>
+
+                  {/* Staff List - Admin only */}
+                  {userRole === 'SUPER_ADMIN' && (
+                  <div className="card">
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px'}}>
+                      <h3 style={{color: 'var(--navy-blue)', fontSize: '1.1rem', margin: 0}}>Staff List</h3>
+                      <button type="button" className="btn btn-secondary" style={{padding: '6px 14px', fontSize: '0.85rem'}} onClick={fetchStaffList}>
+                        {staffListLoading ? 'Loading...' : 'Refresh'}
+                      </button>
+                    </div>
+                    {selectedStaff ? (
+                      <div>
+                        <button type="button" className="btn btn-secondary" style={{padding: '4px 10px', fontSize: '0.8rem', marginBottom: '16px'}} onClick={() => { setSelectedStaff(null); setEditingStaff(null); }}>
+                          ← Back to List
+                        </button>
+                        {editingStaff ? (
+                          <form onSubmit={handleUpdateStaff} className="card" style={{padding: '16px', backgroundColor: 'var(--bg-secondary)'}}>
+                            <h4 style={{marginBottom: '16px'}}>Edit Staff #{editingStaff.id}</h4>
+                            <div style={{marginBottom: '12px'}}>
+                              <span style={{color: 'var(--text-secondary)', fontSize: '0.85rem', display: 'block'}}>ID</span>
+                              <strong>{editingStaff.id}</strong>
+                            </div>
+                            <div style={{marginBottom: '12px'}}>
+                              <label className="form-label">Role</label>
+                              <input type="text" required className="form-input"
+                                value={editingStaff.role}
+                                onChange={e => {
+                                  const newRole = e.target.value;
+                                  const autoWriteRoles = ['WARD_MEMBER', 'COUNSELOR', 'SUPER_ADMIN'];
+                                  const newAction = autoWriteRoles.includes(newRole.toUpperCase()) ? 'Read_Write' : editingStaff.action || 'Read';
+                                  setEditingStaff({...editingStaff, role: newRole, action: newAction});
+                                }} />
+                            </div>
+                            <div style={{marginBottom: '12px'}}>
+                              <label className="form-label">Access</label>
+                              <select className="form-input" value={editingStaff.action || 'Read'}
+                                onChange={e => setEditingStaff({...editingStaff, action: e.target.value})}>
+                                <option value="Read">Read</option>
+                                <option value="Write">Write</option>
+                                <option value="Read_Write">Both Read/Write</option>
+                              </select>
+                            </div>
+                            <div style={{marginBottom: '12px'}}>
+                              <label className="form-label">Ward</label>
+                              <input type="text" className="form-input" placeholder="Optional"
+                                value={editingStaff.ward || ''}
+                                onChange={e => setEditingStaff({...editingStaff, ward: e.target.value})} />
+                            </div>
+                            <div style={{display: 'flex', gap: '8px'}}>
+                              <button type="submit" className="btn btn-primary" style={{flex: 1, padding: '10px'}}>Save</button>
+                              <button type="button" className="btn btn-secondary" style={{flex: 1, padding: '10px'}} onClick={() => setEditingStaff(null)}>Cancel</button>
+                            </div>
+                          </form>
+                        ) : (
+                          <div className="card" style={{padding: '16px', backgroundColor: 'var(--bg-secondary)'}}>
+                            <div style={{marginBottom: '12px'}}>
+                              <span style={{color: 'var(--text-secondary)', fontSize: '0.85rem', display: 'block'}}>ID</span>
+                              <strong>{selectedStaff.id}</strong>
+                            </div>
+
+                            <div style={{marginBottom: '12px'}}>
+                              <span style={{color: 'var(--text-secondary)', fontSize: '0.85rem', display: 'block'}}>Role</span>
+                              <strong>{selectedStaff.role}</strong>
+                            </div>
+                            <div style={{marginBottom: '12px'}}>
+                              <span style={{color: 'var(--text-secondary)', fontSize: '0.85rem', display: 'block'}}>Access</span>
+                              <strong>{selectedStaff.action || 'Read'}</strong>
+                            </div>
+                            <div style={{marginBottom: '12px'}}>
+                              <span style={{color: 'var(--text-secondary)', fontSize: '0.85rem', display: 'block'}}>Ward</span>
+                              <strong>{selectedStaff.ward || 'N/A'}</strong>
+                            </div>
+                            <div>
+                              <span style={{color: 'var(--text-secondary)', fontSize: '0.85rem', display: 'block'}}>Created At</span>
+                              <strong>{selectedStaff.created_at ? new Date(selectedStaff.created_at).toLocaleDateString() : 'N/A'}</strong>
+                            </div>
+                            {selectedStaff?.action !== 'Read' && (
+                            <div style={{marginTop: '20px', display: 'flex', gap: '8px'}}>
+                              <button type="button" className="btn btn-primary" style={{flex: 1, padding: '10px'}} onClick={() => setEditingStaff({...selectedStaff})}>
+                                <Pencil size={16} style={{marginRight: '6px'}} /> Edit
+                              </button>
+                              <button type="button" className="btn btn-danger" style={{flex: 1, padding: '10px'}} onClick={() => handleDeleteStaff(selectedStaff.id)}>
+                                Delete Staff
+                              </button>
+                            </div>
+                            )}
+                            {selectedStaff?.action !== 'Read' && (
+                            <div style={{marginTop: '12px'}}>
+                              <button type="button" className="btn btn-secondary" style={{width: '100%', padding: '10px'}} onClick={() => setResetPasswordStaff(selectedStaff)}>
+                                <Lock size={16} style={{marginRight: '6px'}} /> Reset Password
+                              </button>
+                            </div>
+                            )}
+                          </div>
+                        )}
+                        {resetPasswordStaff && resetPasswordStaff?.action !== 'Read' && (
+                          <div className="card" style={{padding: '16px', backgroundColor: 'var(--bg-secondary)', marginTop: '16px'}}>
+                            <h4 style={{marginBottom: '16px'}}>Reset Password for Staff #{resetPasswordStaff.id}</h4>
+                            <form onSubmit={handleResetStaffPassword}>
+                              <div className="form-group">
+                                <label className="form-label">New Password</label>
+                                <input type="password" required className="form-input" placeholder="Enter new password (min 6 chars)"
+                                  value={resetPasswordData.newPassword}
+                                  onChange={e => setResetPasswordData({...resetPasswordData, newPassword: e.target.value})} />
+                              </div>
+                              <div className="form-group">
+                                <label className="form-label">Confirm New Password</label>
+                                <input type="password" required className="form-input" placeholder="Confirm new password"
+                                  value={resetPasswordData.confirmPassword}
+                                  onChange={e => setResetPasswordData({...resetPasswordData, confirmPassword: e.target.value})} />
+                              </div>
+                              <div style={{display: 'flex', gap: '8px'}}>
+                                <button type="submit" className="btn btn-primary" style={{flex: 1, padding: '10px'}} disabled={resetPasswordLoading}>
+                                  {resetPasswordLoading ? 'Resetting...' : 'Reset Password'}
+                                </button>
+                                <button type="button" className="btn btn-secondary" style={{flex: 1, padding: '10px'}} onClick={() => { setResetPasswordStaff(null); setResetPasswordData({ newPassword: '', confirmPassword: '' }); }}>
+                                  Cancel
+                                </button>
+                              </div>
+                            </form>
+                          </div>
+                        )}
+
+                      </div>
+                    ) : (
+                      <div className="table-wrapper" style={{marginBottom: 0}}>
+                        {staffList.length === 0 ? (
+                          <p style={{textAlign: 'center', padding: '20px', color: 'var(--text-secondary)'}}>
+                            {staffListLoading ? 'Loading...' : 'No staff found. Create one above.'}
+                          </p>
+                        ) : (
+                          <table className="data-table">
+                            <thead>
+                              <tr>
+                                <th>ID</th>
+                                <th>Role</th>
+                                <th>Access</th>
+                                <th>Ward</th>
+                                <th></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {staffList.map(s => (
+                                <tr key={s.id} style={{cursor: 'pointer'}} onClick={() => setSelectedStaff(s)}>
+                                  <td>{s.id}</td>
+                                  <td>{s.role}</td>
+                                  <td>{s.action || 'Read'}</td>
+                                  <td>{s.ward || '-'}</td>
+                                  <td><button className="btn btn-secondary" style={{padding: '4px 10px', fontSize: '0.8rem'}}>View</button></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  )}
               </div>
             )}
 

@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "description": "A web portal for MLA Ambattur constituency that allows citizens to book appointments and raise grievances online, with an admin panel for managing them.",
   "main": "index.js",
-  "scripts": {},
+  "scripts": {
+    "test": "playwright test --project=chromium",
+    "test:all": "playwright test"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",

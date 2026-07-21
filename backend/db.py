@@ -128,6 +128,25 @@ def initialize_database_schema():
                     """)
                     print("Database migrations applied successfully.")
 
+                # Check if admins table has designation and ward columns
+                cursor.execute("SELECT COLUMN_NAME FROM information_schema.columns WHERE table_name = 'admins' AND column_name = 'designation';")
+                if not cursor.fetchone():
+                    print("Adding designation and ward columns to admins table...")
+                    cursor.execute("""
+                        ALTER TABLE admins ADD COLUMN IF NOT EXISTS designation VARCHAR(100);
+                        ALTER TABLE admins ADD COLUMN IF NOT EXISTS ward VARCHAR(50);
+                    """)
+                    print("Admins table migration applied successfully.")
+
+                # Check if admins table has action column
+                cursor.execute("SELECT COLUMN_NAME FROM information_schema.columns WHERE table_name = 'admins' AND column_name = 'action';")
+                if not cursor.fetchone():
+                    print("Adding action column to admins table...")
+                    cursor.execute("""
+                        ALTER TABLE admins ADD COLUMN IF NOT EXISTS action VARCHAR(10) DEFAULT 'Read' NOT NULL;
+                    """)
+                    print("Action column migration applied successfully.")
+
                 # Check if notification_logs table exists
                 cursor.execute("SELECT EXISTS (SELECT FROM pg_tables WHERE tablename = 'notification_logs');")
                 logs_exists = cursor.fetchone()[0]

@@ -1,6 +1,20 @@
 import os
-import requests
+import ssl
+import requests as _orig_requests
+from requests.adapters import HTTPAdapter
 from dotenv import load_dotenv
+
+class _SupabaseSSLAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+_http = _orig_requests.Session()
+_http.mount('https://', _SupabaseSSLAdapter())
+requests = _http
 
 # Load env file in case of standalone execution (e.g. migration script)
 env_path = os.path.join(os.path.dirname(__file__), ".env")
