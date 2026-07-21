@@ -2021,6 +2021,8 @@ def get_namma_mla_analytics(
 def get_namma_mla_complaints_list(
     page: int = 1,
     limit: int = 20,
+    sort: Optional[str] = None,
+    search: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     ward_number: Optional[str] = None,
@@ -2048,10 +2050,11 @@ def get_namma_mla_complaints_list(
         "constituency": constituency,
         "search_id": search_id,
         "search_citizen": search_citizen,
-        "month": month
+        "month": month,
+        "search": search
     }
     try:
-        complaints_data = namma_mla_analytics.get_complaints_list(filters, page, limit)
+        complaints_data = namma_mla_analytics.get_complaints_list(filters, page, limit, sort)
         return complaints_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
