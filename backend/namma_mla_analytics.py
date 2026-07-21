@@ -72,7 +72,7 @@ def validate_excel_data(file_contents: bytes, filename: str) -> Dict[str, Any]:
             field_mapping["category"] = h
         elif clean in ["priority", "level", "urgency"]:
             field_mapping["priority"] = h
-        elif clean in ["status", "state", "complaintstatus"]:
+        elif clean in ["status", "complaintstatus"]:
             field_mapping["status"] = h
         elif clean in ["user", "citizen", "citizenname", "name", "username"]:
             field_mapping["citizen_name"] = h
@@ -381,8 +381,11 @@ def build_filter_clause(filters: Dict[str, Any]) -> tuple:
         params.append(filters["status"])
         
     if filters.get("priority"):
-        clauses.append("priority = %s")
-        params.append(filters["priority"])
+        if filters["priority"] in ["High/Urgent", "high_priority"]:
+            clauses.append("priority IN ('HIGH', 'CRITICAL', 'URGENT', 'High', 'Urgent')")
+        else:
+            clauses.append("UPPER(priority) = %s")
+            params.append(filters["priority"].upper())
         
     if filters.get("assignee"):
         clauses.append("assignee = %s")
@@ -401,6 +404,11 @@ def build_filter_clause(filters: Dict[str, Any]) -> tuple:
         search_val = f"%{filters['search_citizen']}%"
         params.append(search_val)
         params.append(search_val)
+        
+    if filters.get("search"):
+        search_val = f"%{filters['search']}%"
+        clauses.append("(complaint_id ILIKE %s OR description ILIKE %s OR assignee ILIKE %s OR ward_number::text ILIKE %s OR category ILIKE %s)")
+        params.extend([search_val, search_val, search_val, search_val, search_val])
         
     if filters.get("month"):
         try:
@@ -763,11 +771,28 @@ def get_analytics_data(filters: Dict[str, Any]) -> Dict[str, Any]:
         "category_status_matrix": category_status_matrix
     }
 
-def get_complaints_list(filters: Dict[str, Any], page: int = 1, limit: int = 20) -> Dict[str, Any]:
+def get_complaints_list(filters: Dict[str, Any], page: int = 1, limit: int = 20, sort: Optional[str] = None) -> Dict[str, Any]:
     """Retrieves paginated and filtered complaint details (useful for Drill Down)."""
     where_sql, params = build_filter_clause(filters)
     offset = (page - 1) * limit
     
+    # Custom sorting order or default
+    if sort == "priority_queue":
+        order_by_sql = """
+            ORDER BY 
+                CASE UPPER(priority)
+                    WHEN 'CRITICAL' THEN 1
+                    WHEN 'URGENT' THEN 1
+                    WHEN 'HIGH' THEN 2
+                    WHEN 'MEDIUM' THEN 3
+                    WHEN 'LOW' THEN 4
+                    ELSE 5
+                END ASC,
+                created_at ASC
+        """
+    else:
+        order_by_sql = "ORDER BY created_at DESC"
+        
     with db.get_db_cursor() as cursor:
         # Get count
         count_query = f"SELECT COUNT(*) FROM namma_mla_complaints {where_sql};"
@@ -782,7 +807,7 @@ def get_complaints_list(filters: Dict[str, Any], page: int = 1, limit: int = 20)
                 resolution_note, resolved_at, created_at, assignee, imported_at
             FROM namma_mla_complaints
             {where_sql}
-            ORDER BY created_at DESC
+            {order_by_sql}
             LIMIT %s OFFSET %s;
         """
         query_params = params + [limit, offset]
